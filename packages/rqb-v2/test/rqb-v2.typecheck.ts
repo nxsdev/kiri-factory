@@ -66,6 +66,9 @@ factories.comments.for("author", author).for("reviewer", reviewer);
 // @ts-expect-error for should not accept a many relation key
 factories.users.for("posts");
 
+// @ts-expect-error for(...) requires an explicit parent row
+factories.posts.for("author");
+
 // @ts-expect-error for(...) must use the relation target table row
 factories.posts.for("author", { id: 1, authorId: 1 });
 

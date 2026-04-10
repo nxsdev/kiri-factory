@@ -6,9 +6,9 @@ import type { FactoryBinding, FactoryInferenceOptions } from "./types";
 import { tableNameOf } from "./drizzle-introspection";
 import type { RuntimeRelations } from "./runtime-relations";
 
-type FactoryTransient = Record<string, unknown>;
 type TableMap = Record<string, Table>;
-type AnyDefinition = FactoryDefinition<Table, FactoryTransient>;
+type AnyDefinition = FactoryDefinition<Table>;
+type ConnectedRegistry = Record<string, AutoFactory<Table>>;
 
 export interface FactoryLintIssue {
   key: string;
@@ -24,8 +24,8 @@ export function connectRuntimeRegistry(
   runtimeRelations: RuntimeRelations | undefined,
 ) {
   const resolvedDefinitions = normalizeDefinitions(tables, definitions, inference);
-  const registry = {} as Record<string, AutoFactory<Table, FactoryTransient>>;
-  const tableMap = new Map<Table, AutoFactory<Table, FactoryTransient>>();
+  const registry: ConnectedRegistry = {};
+  const tableMap = new Map<Table, AutoFactory<Table>>();
   const runtimeBinding = {
     ...binding,
     inference,
@@ -45,7 +45,7 @@ export function connectRuntimeRegistry(
 }
 
 export function attachRegistryHelpers<TTables extends TableMap>(
-  registry: Record<string, AutoFactory<Table, FactoryTransient>>,
+  registry: ConnectedRegistry,
   tables: TTables,
 ) {
   Object.defineProperty(registry, "get", {
@@ -152,7 +152,7 @@ function normalizeDefinitions(
 ) {
   assertDefinitionsMatchTables(tables, definitions);
 
-  const resolved = {} as Record<string, AutoFactory<Table, FactoryTransient>>;
+  const resolved = {} as Record<string, AutoFactory<Table>>;
 
   for (const [key, table] of Object.entries(tables)) {
     const definition = definitions?.[key];
@@ -182,5 +182,5 @@ function asAutoFactory(definition: AnyDefinition, key: string) {
     );
   }
 
-  return definition as unknown as AutoFactory<Table, FactoryTransient>;
+  return definition as unknown as AutoFactory<Table>;
 }

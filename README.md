@@ -1,49 +1,14 @@
 # kiri-factory
 
-Schema-driven factories for Drizzle ORM.
+Schema-driven factories for explicit Drizzle ORM test setup.
 
-`kiri-factory` is built for real database tests where plain `db.insert(...)` starts to get noisy:
+`kiri-factory` keeps row creation close to plain `insert`, but removes the noisy parts:
 
-- large tables with many required columns
-- repeated setup across hundreds or thousands of tests
-- relation-heavy schemas where foreign keys are easy to get wrong
+- shared required-column values live in one factory definition
+- `for("relation", row)` wires foreign keys by relation name
+- `create()` still returns the row for the table you asked for
 
-The core idea is simple:
-
-- `build()` returns one in-memory row
-- `buildMany()` returns many in-memory rows
-- `create()` returns one row
-- `createMany()` returns many rows
-- `for("relation", row)` wires foreign keys by relation name instead of raw column names
-- `defineFactory(..., { columns: (f) => ({ ... }) })` can share the same public `drizzle-seed` generators used by official `refine((f) => ...)` examples
-
-That keeps test setup explicit without turning the library into a second language.
-
-## Install
-
-```bash
-pnpm add drizzle-orm kiri-factory
-```
-
-Requirements:
-
-- ESM only
-- Node `^20.19.0 || >=22.12.0`
-- `kiri-factory` is tested with `drizzle-orm` `0.45.x`
-- `kiri-factory/rqb-v2` is tested with `drizzle-orm` `1.0.0-beta.21`
-
-`kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
-
-## Choose Your Entrypoint
-
-| Import                | Use when                                  |
-| --------------------- | ----------------------------------------- |
-| `kiri-factory`        | your project uses stable `relations(...)` |
-| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
-
-## Quick Start
-
-### Stable `relations(...)`
+## Quick Example
 
 ```ts
 import * as schema from "./db/schema";
@@ -63,13 +28,86 @@ const post = await factories.posts.for("author", author).create({
 });
 ```
 
+For shared column definitions, `defineFactory(..., { columns })` reuses the same public
+`drizzle-seed` generators used by official `seed(...).refine((f) => ...)` examples:
+
+```ts
+const customerFactory = defineFactory(customers, {
+  columns: (f) => ({
+    status: "active",
+    companyName: f.companyName(),
+    contactName: f.fullName(),
+    contactEmail: f.email(),
+  }),
+});
+
+await seed(db, schema).refine((f) => ({
+  customers: {
+    count: 1000,
+    columns: customerFactory.columns(f),
+  },
+}));
+```
+
+Bulk seeding still belongs to `drizzle-seed`.  
+`kiri-factory` stays focused on readable row creation and relation wiring for tests.
+
+## Install
+
+```bash
+pnpm add drizzle-orm kiri-factory
+```
+
+Requirements:
+
+- ESM only
+- Node `^20.19.0 || >=22.12.0`
+- `kiri-factory` is tested with `drizzle-orm` `0.45.x`
+- `kiri-factory/rqb-v2` is tested with `drizzle-orm` `1.0.0-beta.21`
+
+`kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
+
+## Entrypoints
+
+| Import                | Use when                                  |
+| --------------------- | ----------------------------------------- |
+| `kiri-factory`        | your project uses stable `relations(...)` |
+| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
+
+## Many-to-many
+
+Use the junction table explicitly in both stable and RQB v2.
+
+```ts
+const user = await factories.users.create();
+const group = await factories.groups.create();
+
+const membership = await factories.memberships.for("user", user).for("group", group).create({
+  role: "owner",
+});
+```
+
+## What It Does
+
+- `build()` / `buildMany()` for in-memory rows
+- `create()` / `createMany()` for persisted rows
+- `for("relation", row)` for explicit parent wiring
+- `defineFactory(..., { columns })` for reusable per-table definitions
+
+`kiri-factory` is intentionally narrow. It does not try to replace `drizzle-seed`,
+prove every database constraint ahead of time, or hide multi-row scenarios behind a
+second DSL.
+
 ### RQB v2 `defineRelations(...)`
 
 ```ts
+import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { createFactories } from "kiri-factory/rqb-v2";
 import { defineRelations } from "drizzle-orm";
+import * as schema from "./db/schema";
 
+const client = new PGlite();
 const db = drizzle({ client });
 
 const relations = defineRelations(schema, (r) => ({
@@ -93,58 +131,15 @@ const author = await factories.users.create();
 const post = await factories.posts.for("author", author).create();
 ```
 
-### Many-to-many
+If you want the official seeding API itself, go straight to:
 
-Use the junction table explicitly in both stable and RQB v2.
-
-```ts
-const user = await factories.users.create();
-const group = await factories.groups.create();
-
-const membership = await factories.memberships.for("user", user).for("group", group).create({
-  role: "owner",
-});
-```
-
-## Why This Shape?
-
-The main value is inference plus explicit row creation.
-
-- schema metadata fills common required values for you
-- relation names replace fragile FK column wiring
-- returned values stay predictable because `create()` always returns the row for that table
-
-For bulk fake data, `drizzle-seed` is still the better tool.  
-For precise test setup and reusable factory definitions, `kiri-factory` is the better fit.
-
-You can also share column definitions with official `drizzle-seed`:
-
-```ts
-const customerFactory = defineFactory(customers, {
-  columns: (f) => ({
-    companyName: f.companyName(),
-    contactName: f.fullName(),
-    contactEmail: f.email(),
-  }),
-});
-
-await seed(db, schema).refine((f) => ({
-  customers: {
-    count: 1000,
-    columns: customerFactory.columns(f),
-  },
-}));
-```
-
-That reuse is intentionally narrow:
-
-- shared column generators come from the public `drizzle-seed` generator surface
-- bulk seeding behavior still belongs to `drizzle-seed`
-- runtime validation and safety rules still belong to `kiri-factory`
+- [Drizzle `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
+- [Drizzle generator functions](https://orm.drizzle.team/docs/seed-functions)
+- [Drizzle `with` seeding guide](https://orm.drizzle.team/docs/guides/seeding-using-with-option)
 
 ## Docs
 
-The docs are split into small Markdown files so humans, Codex, and Claude Code can jump directly to one topic.
+The docs are split into small Markdown files so humans and agents can jump directly to one topic.
 
 - [Docs index](./docs/README.md)
 - [Getting started](./docs/getting-started.md)

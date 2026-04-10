@@ -116,17 +116,16 @@ describe("kiri-factory rqb-v2 runtime", () => {
       relations,
       definitions: {
         users: defineFactory(users, {
-          traits: {
-            admin: {
-              role: "admin",
-            },
+          columns: {
+            role: "member",
           },
         }),
       },
     });
 
-    const built = await factories.users.withTraits("admin").buildMany(2, (index) => ({
+    const built = await factories.users.buildMany(2, (index) => ({
       email: `built-${index + 1}@example.com`,
+      role: "admin",
     }));
     const created = await factories.users.createMany(2, (index) => ({
       email: `created-${index + 1}@example.com`,

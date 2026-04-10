@@ -87,8 +87,8 @@ export interface FactoryInferenceOptions<TTable extends Table = Table> {
    * Supported forms intentionally stay narrow:
    * `>`, `>=`, `<`, `<=`, `BETWEEN`, and `IN (...)` on one column.
    *
-   * Complex SQL expressions still need `state(...)`, overrides, or custom
-   * resolvers.
+   * These parsed checks act as guardrails for generated values. Complex SQL
+   * expressions still need explicit overrides or custom resolvers.
    *
    * @default true
    */
@@ -128,19 +128,42 @@ export type FactorySeedFunctions = ReturnType<typeof getGeneratorsFunctions>;
 export type FactorySeedGenerator = ReturnType<FactorySeedFunctions[keyof FactorySeedFunctions]>;
 
 /**
- * Explicit drizzle-seed column generators shared by runtime factories and
- * `seed(...).refine((f) => ...)`.
+ * One column entry declared inside `columns`.
+ *
+ * This can be either:
+ * - an official drizzle-seed generator returned from `f.*(...)`
+ * - a fixed literal value that should be reused for every row
+ */
+export type FactoryColumnValue<TTable extends Table, TKey extends keyof InferInsertModel<TTable>> =
+  | FactorySeedGenerator
+  | InferInsertModel<TTable>[TKey];
+
+/**
+ * Shared column definition source used by factories.
+ *
+ * `columns` is the normal place to put reusable values. It can mix:
+ * - drizzle-seed generators for realistic fake data
+ * - fixed literals such as `role: "member"`
+ */
+export type FactoryColumnsDefinition<TTable extends Table> = Partial<{
+  [K in keyof InferInsertModel<TTable>]: FactoryColumnValue<TTable, K>;
+}>;
+
+/**
+ * Pure drizzle-seed columns returned from `factory.columns(f)`.
+ *
+ * This shape is safe to pass directly into `seed(...).refine((f) => ...)`.
  */
 export type FactorySeedColumns<TTable extends Table> = Partial<
   Record<keyof InferInsertModel<TTable>, FactorySeedGenerator>
 >;
 
 /**
- * Shared drizzle-seed column definition callback.
+ * Shared column definition input accepted by `defineFactory(..., { columns })`.
  *
- * This uses the same `f` callback object that Drizzle's official
- * `seed(...).refine((f) => ...)` API exposes.
+ * When a callback is used, it receives the same `f` callback object that
+ * Drizzle's official `seed(...).refine((f) => ...)` API exposes.
  */
-export type FactorySeedColumnsInput<TTable extends Table> = (
-  f: FactorySeedFunctions,
-) => FactorySeedColumns<TTable>;
+export type FactorySeedColumnsInput<TTable extends Table> =
+  | FactoryColumnsDefinition<TTable>
+  | ((f: FactorySeedFunctions) => FactoryColumnsDefinition<TTable>);

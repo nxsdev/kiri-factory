@@ -19,18 +19,10 @@ That makes them easier to:
 - [Compatibility and limits](./compatibility.md)
 - [Recipes](./recipes/README.md)
 
-## Suggested Reading Order
-
-1. [Getting started](./getting-started.md)
-2. [Defining factories](./define-factory.md)
-3. [Relations](./relations.md)
-4. [Many-to-many patterns](./many-to-many.md)
-5. [Inference and `CHECK` support](./inference.md)
-
 ## Quick Links By Situation
 
 - first install or first runtime: [Getting started](./getting-started.md)
-- one table needs traits or transient inputs: [Defining factories](./define-factory.md)
+- one table needs shared column definitions: [Defining factories](./define-factory.md)
 - you want to connect rows by relation name: [Relations](./relations.md)
 - your schema uses junction tables: [Many-to-many patterns](./many-to-many.md)
 - you want to understand what is inferred: [Inference and `CHECK` support](./inference.md)
@@ -38,3 +30,11 @@ That makes them easier to:
 - you want support boundaries first: [Compatibility and limits](./compatibility.md)
 - you want concrete real-world examples: [Recipes](./recipes/README.md)
 - your child row depends on multiple foreign-key columns: [Composite foreign keys](./recipes/composite-foreign-keys.md)
+
+## Official `drizzle-seed` Docs
+
+Use these when you want the official seeding behavior itself:
+
+- [Seed overview](https://orm.drizzle.team/docs/seed-overview)
+- [Generator functions](https://orm.drizzle.team/docs/seed-functions)
+- [`with` seeding guide](https://orm.drizzle.team/docs/guides/seeding-using-with-option)

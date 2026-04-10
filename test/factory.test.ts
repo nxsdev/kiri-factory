@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { mysqlTable, serial as mysqlSerial, varchar as mysqlVarchar } from "drizzle-orm/mysql-core";
 import {
   check,
   customType,
@@ -175,6 +176,12 @@ const seededCustomers = pgTable("seeded_customers", {
   contactEmail: text("contact_email").notNull().unique(),
 });
 
+const mysqlSeededCustomers = mysqlTable("mysql_seeded_customers", {
+  id: mysqlSerial("id").primaryKey(),
+  contactEmail: mysqlVarchar("contact_email", { length: 255 }).notNull().unique(),
+  contactName: mysqlVarchar("contact_name", { length: 255 }).notNull(),
+});
+
 const scopedArticles = pgTable(
   "scoped_articles",
   {
@@ -299,27 +306,23 @@ afterEach(async () => {
 });
 
 describe("kiri-factory stable runtime", () => {
-  it("builds and creates many rows with inference, traits, and overrides", async () => {
+  it("builds and creates many rows with columns and overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
       db,
       schema,
       definitions: {
         users: defineFactory(users, {
-          defaults: {
+          columns: {
             role: "member",
-          },
-          traits: {
-            admin: {
-              role: "admin",
-            },
           },
         }),
       },
     });
 
-    const built = await factories.users.withTraits("admin").buildMany(2, (index) => ({
+    const built = await factories.users.buildMany(2, (index) => ({
       email: `built-${index + 1}@example.com`,
+      role: "admin",
     }));
     const created = await factories.users.createMany(2, (index) => ({
       email: `created-${index + 1}@example.com`,
@@ -506,7 +509,7 @@ describe("kiri-factory stable runtime", () => {
     expect(note.embedding).toBe("[0,0,0]");
   });
 
-  it("infers uuid and point columns without explicit state", async () => {
+  it("uses official drizzle-seed-aligned generators for uuid and point columns", async () => {
     const factories = createFactories({
       db: {} as object,
       schema: { spatialNotes },
@@ -515,9 +518,13 @@ describe("kiri-factory stable runtime", () => {
 
     const note = await factories.spatialNotes.build();
 
-    expect(note.externalId).toBe("00000000-0000-4000-8000-000000000001");
-    expect(note.tuplePoint).toEqual([1, 2]);
-    expect(note.objectPoint).toEqual({ x: 1, y: 2 });
+    expect(note.externalId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(note.tuplePoint).toEqual(
+      expect.arrayContaining([expect.any(Number), expect.any(Number)]),
+    );
+    expect(note.objectPoint).toEqual({ x: expect.any(Number), y: expect.any(Number) });
   });
 
   it("supports point-like custom types through customTypes resolvers", async () => {
@@ -537,18 +544,24 @@ describe("kiri-factory stable runtime", () => {
     expect(note.location).toEqual({ x: 1, y: 2 });
   });
 
-  it("respects simple single-column CHECK constraints during inference", async () => {
+  it("fails fast when official generators violate simple single-column CHECK constraints", async () => {
     const factories = createFactories({
       db: {} as object,
       schema: { constrainedArticles },
       adapter: echoAdapterWithGeneratedIds([]),
     });
 
-    const article = await factories.constrainedArticles.build();
+    await expect(factories.constrainedArticles.build()).rejects.toThrow(
+      /does not satisfy a simple CHECK constraint/i,
+    );
 
-    expect(article.rating).toBeGreaterThanOrEqual(3);
-    expect(article.rating).toBeLessThanOrEqual(5);
-    expect(["draft", "published"]).toContain(article.status);
+    const article = await factories.constrainedArticles.build({
+      rating: 4,
+      status: "draft",
+    });
+
+    expect(article.rating).toBe(4);
+    expect(article.status).toBe("draft");
   });
 
   it("lets complex CHECK constraints fail at insert time", async () => {
@@ -587,6 +600,34 @@ describe("kiri-factory stable runtime", () => {
     expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
   });
 
+  it("keeps auto-selected single-column unique generators unique", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { seededCustomers },
+    });
+
+    const customers = await factories.seededCustomers.createMany(3);
+
+    expect(customers).toHaveLength(3);
+    expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
+  });
+
+  it("uses the official mysql selector for no-definition auto columns", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { mysqlSeededCustomers },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    const customers = await factories.mysqlSeededCustomers.buildMany(3);
+
+    expect(customers).toHaveLength(3);
+    expect(customers[0]?.contactName).toBeTypeOf("string");
+    expect(customers[0]?.contactEmail).toContain("@");
+    expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
+  });
+
   it("reuses columns(f) directly in drizzle-seed refine(...)", async () => {
     const { db } = await createTestDb();
     const customerFactory = defineFactory(seededCustomers, {
@@ -608,6 +649,29 @@ describe("kiri-factory stable runtime", () => {
 
     expect(customers).toHaveLength(3);
     expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
+  });
+
+  it("converts literal columns into seed-compatible generators", async () => {
+    const { db } = await createTestDb();
+    const customerFactory = defineFactory(seededCustomers, {
+      columns: (f) => ({
+        companyName: "Acme",
+        contactName: f.fullName(),
+        contactEmail: f.email(),
+      }),
+    });
+
+    await seed(db, { seededCustomers }).refine((f) => ({
+      seededCustomers: {
+        count: 3,
+        columns: customerFactory.columns(f),
+      },
+    }));
+
+    const customers = await db.select().from(seededCustomers);
+
+    expect(customers).toHaveLength(3);
+    expect(customers.every((customer) => customer.companyName === "Acme")).toBe(true);
   });
 
   it("fails fast when columns(f) uses a non-unique generator for a unique column", async () => {
@@ -695,7 +759,7 @@ describe("kiri-factory stable runtime", () => {
       schema: { seededCustomers },
       definitions: {
         seededCustomers: defineFactory(seededCustomers, {
-          defaults: {
+          columns: {
             companyName: "Acme",
             contactEmail: "duplicate@example.com",
             contactName: "Ada",

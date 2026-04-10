@@ -54,10 +54,18 @@ export type FactorySeedFunctions = ReturnType<typeof getGeneratorsFunctions>;
 
 export type FactorySeedGenerator = ReturnType<FactorySeedFunctions[keyof FactorySeedFunctions]>;
 
+export type FactoryColumnValue<TTable extends Table, TKey extends keyof InferInsertModel<TTable>> =
+  | FactorySeedGenerator
+  | InferInsertModel<TTable>[TKey];
+
+export type FactoryColumnsDefinition<TTable extends Table> = Partial<{
+  [K in keyof InferInsertModel<TTable>]: FactoryColumnValue<TTable, K>;
+}>;
+
 export type FactorySeedColumns<TTable extends Table> = Partial<
   Record<keyof InferInsertModel<TTable>, FactorySeedGenerator>
 >;
 
-export type FactorySeedColumnsInput<TTable extends Table> = (
-  f: FactorySeedFunctions,
-) => FactorySeedColumns<TTable>;
+export type FactorySeedColumnsInput<TTable extends Table> =
+  | FactoryColumnsDefinition<TTable>
+  | ((f: FactorySeedFunctions) => FactoryColumnsDefinition<TTable>);

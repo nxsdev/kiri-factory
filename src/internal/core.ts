@@ -14,7 +14,12 @@ import {
   qualifiedTableNameOf,
   tableNameOf,
 } from "./drizzle-introspection";
-import { evaluateFactorySeedColumns } from "./drizzle-seed-runtime";
+import {
+  evaluateAutoSeedGenerator,
+  evaluateFactorySeedColumns,
+  resolveFactorySeedColumns,
+} from "./drizzle-seed-runtime";
+import { selectAutoSeedGenerator } from "./drizzle-seed-selector";
 import { type RuntimeRelationMetadata, type RuntimeRelations } from "./runtime-relations";
 import type {
   FactoryAdapter,
@@ -40,15 +45,12 @@ type InferredValue =
   | Uint8Array
   | Record<string, unknown>
   | unknown[];
-type MaybePromise<T> = T | Promise<T>;
-type FactoryTransient = Record<string, unknown>;
 type InferInsert<TTable extends Table> = InferInsertModel<TTable>;
 type InferSelect<TTable extends Table> = InferSelectModel<TTable>;
-type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
 type RuntimeBinding<DB = unknown> = FactoryBinding<DB> & {
   inference?: FactoryInferenceOptions<Table>;
-  registry?: Map<Table, AutoFactory<Table, FactoryTransient>>;
+  registry?: Map<Table, AutoFactory<Table>>;
   relations?: RuntimeRelations;
 };
 type ValueSource = "auto" | "factory" | "override" | "relation";
@@ -59,135 +61,13 @@ type ValueSourceMap = Record<string, ValueSource>;
  */
 export type FactoryOverrides<TTable extends Table> = Partial<InferInsert<TTable>>;
 
-/**
- * Extra per-call options passed to `build()` and `create()`.
- */
-export interface FactoryCallOptions<TTransient extends FactoryTransient = {}> {
-  /**
-   * Extra values available inside `state(...)`. They are never persisted.
-   */
-  transient?: Partial<TTransient>;
-}
-
-/**
- * Context available while refining a factory.
- */
-export type FactoryStateContext<TTable extends Table, TTransient extends FactoryTransient = {}> = {
-  /**
-   * Monotonic sequence number for the current factory.
-   */
-  readonly seq: number;
-  /**
-   * Whether the current run is building in memory or persisting to the database.
-   */
-  readonly strategy: "build" | "create";
-  /**
-   * The Drizzle table being built.
-   */
-  readonly table: TTable;
-  /**
-   * Extra values declared with `transient(...)` and optional per-call inputs.
-   */
-  readonly transient: Readonly<Partial<TTransient>>;
-  /**
-   * Values resolved so far.
-   */
-  readonly values: Readonly<Partial<InferInsert<TTable>>>;
-  /**
-   * Reuses another factory and carries over the current runtime automatically.
-   */
-  readonly use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
-    factory: AutoFactory<TOtherTable, TOtherTransient>,
-  ) => AutoFactory<TOtherTable, TOtherTransient>;
-};
-
-/**
- * A reusable refinement for factory values.
- */
-export type FactoryStateInput<TTable extends Table, TTransient extends FactoryTransient = {}> =
-  | Partial<InferInsert<TTable>>
-  | ((
-      context: FactoryStateContext<TTable, TTransient>,
-    ) => MaybePromise<Partial<InferInsert<TTable>>>);
-
-/**
- * Runs after `build()` resolves values.
- */
-export type FactoryBuildHook<TTable extends Table, TTransient extends FactoryTransient = {}> = (
-  values: InferInsert<TTable>,
-  context: FactoryStateContext<TTable, TTransient>,
-) => MaybePromise<void>;
-
-/**
- * Runs after `create()` persists a row.
- */
-export type FactoryCreateHook<TTable extends Table, TTransient extends FactoryTransient = {}> = (
-  row: InferSelect<TTable>,
-  context: FactoryStateContext<TTable, TTransient> & {
-    readonly input: InferInsert<TTable>;
-  },
-) => MaybePromise<void>;
-
-/**
- * A named trait that can change values and register hooks.
- */
-export interface FactoryTrait<TTable extends Table, TTransient extends FactoryTransient = {}> {
-  /**
-   * Reusable state applied when the trait is active.
-   */
-  state?: FactoryStateInput<TTable, TTransient>;
-  /**
-   * Hooks run after `build()`.
-   */
-  afterBuild?: FactoryBuildHook<TTable, TTransient> | FactoryBuildHook<TTable, TTransient>[];
-  /**
-   * Hooks run after `create()`.
-   */
-  afterCreate?: FactoryCreateHook<TTable, TTransient> | FactoryCreateHook<TTable, TTransient>[];
-}
-
-/**
- * Shorthand accepted by `trait(name, definition)`.
- */
-export type FactoryTraitDefinition<TTable extends Table, TTransient extends FactoryTransient = {}> =
-  | FactoryStateInput<TTable, TTransient>
-  | FactoryTrait<TTable, TTransient>;
-
-type NormalizedTrait<TTable extends Table, TTransient extends FactoryTransient = {}> = {
-  state: Array<
-    (context: FactoryStateContext<TTable, TTransient>) => MaybePromise<Partial<InferInsert<TTable>>>
-  >;
-  afterBuild: FactoryBuildHook<TTable, TTransient>[];
-  afterCreate: FactoryCreateHook<TTable, TTransient>[];
-};
-
-type ResolvedExecution<TTable extends Table, TTransient extends FactoryTransient = {}> = {
-  seq: number;
-  transient: Partial<TTransient>;
-  values: InferInsert<TTable>;
-  use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
-    factory: AutoFactory<TOtherTable, TOtherTransient>,
-  ) => AutoFactory<TOtherTable, TOtherTransient>;
-};
-
-type InternalState<TTable extends Table, TTransient extends FactoryTransient = {}> = {
+type InternalState<TTable extends Table> = {
   table: TTable;
   sequence: SequenceTracker;
   columnsInput?: FactorySeedColumnsInput<TTable>;
   inference: FactoryInferenceOptions<TTable>;
   runtime?: RuntimeBinding;
   forRelations: ForRelationPlan[];
-  traits: Record<string, NormalizedTrait<TTable, TTransient>>;
-  activeTraits: string[];
-  defaultResolvers: Array<
-    (context: FactoryStateContext<TTable, TTransient>) => MaybePromise<Partial<InferInsert<TTable>>>
-  >;
-  stateResolvers: Array<
-    (context: FactoryStateContext<TTable, TTransient>) => MaybePromise<Partial<InferInsert<TTable>>>
-  >;
-  afterBuildHooks: FactoryBuildHook<TTable, TTransient>[];
-  afterCreateHooks: FactoryCreateHook<TTable, TTransient>[];
-  transientDefaults: Partial<TTransient>;
 };
 
 type InferenceMetadata = Column & {
@@ -221,7 +101,7 @@ const requiredColumnKeysCache = new WeakMap<Table, string[]>();
 type ListOverridesInput<TTable extends Table> =
   | FactoryOverrides<TTable>
   | ((index: number) => FactoryOverrides<TTable>);
-type UntypedRelationInput = Record<string, unknown> | undefined;
+type UntypedRelationInput = Record<string, unknown>;
 type ForRelationPlan = {
   input: UntypedRelationInput;
   relationKey: string;
@@ -250,13 +130,13 @@ class SequenceTracker {
  * Auto-generated, schema-driven factory for a single Drizzle table.
  *
  * Precedence is stable and intentional:
- * `auto values -> defaults() -> withTraits() -> state() -> call-site overrides`.
+ * `auto values -> columns -> call-site overrides`.
  */
-export class AutoFactory<TTable extends Table, TTransient extends FactoryTransient = {}> {
+export class AutoFactory<TTable extends Table> {
   readonly [FACTORY_INSTANCE] = true;
-  readonly #state: InternalState<TTable, TTransient>;
+  readonly #state: InternalState<TTable>;
 
-  constructor(state: InternalState<TTable, TTransient>) {
+  constructor(state: InternalState<TTable>) {
     this.#state = state;
   }
 
@@ -266,8 +146,8 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
    * When no adapter is supplied, kiri-factory uses Drizzle's `returning()`
    * support by default.
    */
-  connect<DB>(db: DB, options?: { adapter?: FactoryAdapter<DB> }): AutoFactory<TTable, TTransient>;
-  connect<DB>(binding: FactoryBinding<DB>): AutoFactory<TTable, TTransient>;
+  connect<DB>(db: DB, options?: { adapter?: FactoryAdapter<DB> }): AutoFactory<TTable>;
+  connect<DB>(binding: FactoryBinding<DB>): AutoFactory<TTable>;
   connect<DB>(dbOrBinding: DB | FactoryBinding<DB>, options?: { adapter?: FactoryAdapter<DB> }) {
     return this.#clone({
       sequence: this.#state.sequence.clone(),
@@ -282,86 +162,10 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   }
 
   /**
-   * Sets default values for this factory.
-   */
-  defaults(overrides: FactoryOverrides<TTable>) {
-    return this.#clone({
-      defaultResolvers: [...this.#state.defaultResolvers, normalizeStateInput(overrides)],
-    });
-  }
-
-  /**
-   * Declares extra inputs that can be read from `context.transient`.
-   */
-  transient<TNextTransient extends FactoryTransient>(defaults: TNextTransient) {
-    return new AutoFactory<TTable, Simplify<TTransient & TNextTransient>>({
-      ...(this.#state as unknown as InternalState<TTable, Simplify<TTransient & TNextTransient>>),
-      transientDefaults: mergeDefined(
-        this.#state.transientDefaults,
-        defaults as Partial<TTransient>,
-      ) as Partial<Simplify<TTransient & TNextTransient>>,
-    });
-  }
-
-  /**
-   * Adds custom value logic on top of the auto-generated base values.
-   */
-  state(input: FactoryStateInput<TTable, TTransient>) {
-    return this.#clone({
-      stateResolvers: [...this.#state.stateResolvers, normalizeStateInput(input)],
-    });
-  }
-
-  /**
-   * Registers a reusable named variant.
-   */
-  trait(name: string, definition: FactoryTraitDefinition<TTable, TTransient>) {
-    return this.#clone({
-      traits: {
-        ...this.#state.traits,
-        [name]: normalizeTrait(definition),
-      },
-    });
-  }
-
-  /**
-   * Applies one or more previously defined traits.
-   */
-  withTraits(...names: string[]) {
-    for (const name of names) {
-      if (!this.#state.traits[name]) {
-        throw new Error(`Unknown trait "${name}" for table "${tableNameOf(this.#state.table)}".`);
-      }
-    }
-
-    return this.#clone({
-      activeTraits: [...this.#state.activeTraits, ...names],
-    });
-  }
-
-  /**
-   * Adds a hook that runs after `build()`.
-   */
-  afterBuild(hook: FactoryBuildHook<TTable, TTransient>) {
-    return this.#clone({
-      afterBuildHooks: [...this.#state.afterBuildHooks, hook],
-    });
-  }
-
-  /**
-   * Adds a hook that runs after `create()`.
-   */
-  afterCreate(hook: FactoryCreateHook<TTable, TTransient>) {
-    return this.#clone({
-      afterCreateHooks: [...this.#state.afterCreateHooks, hook],
-    });
-  }
-
-  /**
    * Returns the shared drizzle-seed column generators for this factory.
    */
   columns(f: FactorySeedFunctions): FactorySeedColumns<TTable> {
-    return this.#state.columnsInput?.(f) ?? {};
+    return resolveFactorySeedColumns(this.#state.columnsInput, f);
   }
 
   /**
@@ -370,7 +174,7 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
    * This only works when the connected runtime was created from a Drizzle
    * schema object that also exports `relations(...)`.
    */
-  for(relationKey: string, input?: UntypedRelationInput) {
+  for(relationKey: string, input: UntypedRelationInput) {
     assertUniqueRelationPlan(this.#state.forRelations, relationKey, "for");
 
     return this.#clone({
@@ -388,28 +192,19 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   /**
    * Builds one row in memory.
    */
-  async build(
-    overrides: FactoryOverrides<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    return (await this.#resolve("build", overrides, options, [])).values;
+  async build(overrides: FactoryOverrides<TTable> = {}) {
+    return await this.#resolve("build", overrides);
   }
 
   /**
    * Builds many rows in memory.
    */
-  async buildMany(
-    count: number,
-    overrides: ListOverridesInput<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
+  async buildMany(count: number, overrides: ListOverridesInput<TTable> = {}) {
     assertPositiveCount(count);
     const results: InferInsert<TTable>[] = [];
 
     for (let index = 0; index < count; index += 1) {
-      results.push(
-        (await this.#resolve("build", resolveListOverrides(overrides, index), options, [])).values,
-      );
+      results.push(await this.#resolve("build", resolveListOverrides(overrides, index)));
     }
 
     return results;
@@ -418,70 +213,44 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   /**
    * Builds one row and persists it to the configured database.
    */
-  async create(
-    overrides: FactoryOverrides<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    return this.#createInternal(overrides, options, []);
+  async create(overrides: FactoryOverrides<TTable> = {}) {
+    return this.#createInternal(overrides);
   }
 
   /**
    * Builds and persists many rows.
    */
-  async createMany(
-    count: number,
-    overrides: ListOverridesInput<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
+  async createMany(count: number, overrides: ListOverridesInput<TTable> = {}) {
     assertPositiveCount(count);
     const results: InferSelect<TTable>[] = [];
 
     for (let index = 0; index < count; index += 1) {
-      results.push(await this.#createInternal(resolveListOverrides(overrides, index), options, []));
+      results.push(await this.#createInternal(resolveListOverrides(overrides, index)));
     }
 
     return results;
   }
 
-  #clone(overrides: Partial<InternalState<TTable, TTransient>>) {
-    return new AutoFactory<TTable, TTransient>({
+  #clone(overrides: Partial<InternalState<TTable>>) {
+    return new AutoFactory<TTable>({
       ...this.#state,
       ...overrides,
     });
   }
 
-  async #createInternal(
-    overrides: FactoryOverrides<TTable>,
-    options: FactoryCallOptions<TTransient>,
-    path: Table[],
-  ) {
+  async #createInternal(overrides: FactoryOverrides<TTable>) {
     if (!this.#state.runtime) {
       throw new Error(
         `Factory for table "${tableNameOf(this.#state.table)}" is not connected. Call connect(db) before create().`,
       );
     }
 
-    const resolved = await this.#resolve("create", overrides, options, path);
+    const resolved = await this.#resolve("create", overrides);
     const row = await this.#state.runtime.adapter.create({
       db: this.#state.runtime.db,
       table: this.#state.table,
-      values: resolved.values,
+      values: resolved,
     });
-
-    const context = this.#createContext(
-      "create",
-      resolved.seq,
-      resolved.transient,
-      resolved.values,
-      resolved.use,
-    );
-
-    for (const hook of this.#collectAfterCreateHooks()) {
-      await hook(row, {
-        ...context,
-        input: resolved.values,
-      });
-    }
 
     return row;
   }
@@ -489,14 +258,8 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   async #resolve(
     strategy: "build" | "create",
     overrides: FactoryOverrides<TTable>,
-    options: FactoryCallOptions<TTransient>,
-    path: Table[],
-  ): Promise<ResolvedExecution<TTable, TTransient>> {
+  ): Promise<InferInsert<TTable>> {
     const seq = this.#state.sequence.next();
-    const transient = mergeDefined(this.#state.transientDefaults, options.transient);
-    const use = <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
-      factory: AutoFactory<TOtherTable, TOtherTransient>,
-    ) => (this.#state.runtime ? factory.connect(this.#state.runtime) : factory);
     let values = inferAutoValues(
       this.#state.table,
       seq,
@@ -515,42 +278,27 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
       "factory",
     );
 
-    for (const resolver of this.#collectStateResolvers()) {
-      const patch = await resolver(this.#createContext(strategy, seq, transient, values, use));
-      values = mergeDefinedWithSource(values, patch, valueSources, "factory");
-    }
-
     values = mergeDefinedWithSource(values, overrides, valueSources, "override");
     values = pruneUndefined(values) as Partial<InferInsert<TTable>>;
     valueSources = pruneUndefinedSources(values, valueSources);
 
     if (strategy === "create") {
-      ({ valueSources, values } = await this.#resolvePlannedParents(values, valueSources, path));
+      ({ valueSources, values } = await this.#resolvePlannedParents(values, valueSources));
     }
 
     ensureRequiredColumns(this.#state.table, values);
     ensureSafeUniqueConstraints(this.#state.table, values, valueSources);
+    ensureSimpleChecksSatisfied(
+      this.#state.table,
+      values,
+      this.#state.inference,
+      this.#state.runtime?.inference,
+    );
 
-    const finalValues = values as InferInsert<TTable>;
-    const buildContext = this.#createContext(strategy, seq, transient, finalValues, use);
-
-    for (const hook of this.#collectAfterBuildHooks()) {
-      await hook(finalValues, buildContext);
-    }
-
-    return {
-      seq,
-      transient,
-      values: finalValues,
-      use,
-    };
+    return values as InferInsert<TTable>;
   }
 
-  async #resolvePlannedParents(
-    values: Partial<InferInsert<TTable>>,
-    valueSources: ValueSourceMap,
-    path: Table[],
-  ) {
+  async #resolvePlannedParents(values: Partial<InferInsert<TTable>>, valueSources: ValueSourceMap) {
     if (!this.#state.runtime?.registry || !this.#state.runtime.relations) {
       return { valueSources, values };
     }
@@ -575,9 +323,7 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
         );
       }
 
-      const parent = plan.input
-        ? plan.input
-        : await parentFactory.#createInternal({}, {}, [...path, this.#state.table]);
+      const parent = plan.input;
 
       for (let index = 0; index < relation.sourceKeys.length; index += 1) {
         const sourceKey = relation.sourceKeys[index]!;
@@ -595,50 +341,6 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
       values: resolved,
     };
   }
-
-  #collectStateResolvers() {
-    const traitResolvers = this.#state.activeTraits.flatMap(
-      (name) => this.#state.traits[name]!.state,
-    );
-
-    return [...this.#state.defaultResolvers, ...traitResolvers, ...this.#state.stateResolvers];
-  }
-
-  #collectAfterBuildHooks() {
-    const traitHooks = this.#state.activeTraits.flatMap(
-      (name) => this.#state.traits[name]!.afterBuild,
-    );
-
-    return [...traitHooks, ...this.#state.afterBuildHooks];
-  }
-
-  #collectAfterCreateHooks() {
-    const traitHooks = this.#state.activeTraits.flatMap(
-      (name) => this.#state.traits[name]!.afterCreate,
-    );
-
-    return [...traitHooks, ...this.#state.afterCreateHooks];
-  }
-
-  #createContext(
-    strategy: "build" | "create",
-    seq: number,
-    transient: Partial<TTransient>,
-    values: Partial<InferInsert<TTable>>,
-    use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
-      factory: AutoFactory<TOtherTable, TOtherTransient>,
-    ) => AutoFactory<TOtherTable, TOtherTransient>,
-  ): FactoryStateContext<TTable, TTransient> {
-    return {
-      seq,
-      strategy,
-      table: this.#state.table,
-      transient,
-      values,
-      use,
-    };
-  }
-
   #getRequiredRelation(relationKey: string) {
     const relation = this.#state.runtime?.relations?.get(this.#state.table, relationKey);
 
@@ -668,20 +370,13 @@ export function fromTable<TTable extends Table>(
     ...(options.columns ? { columnsInput: options.columns } : {}),
     inference: options.inference ?? {},
     forRelations: [],
-    traits: {},
-    activeTraits: [],
-    defaultResolvers: [],
-    stateResolvers: [],
-    afterBuildHooks: [],
-    afterCreateHooks: [],
-    transientDefaults: {},
   });
 }
 
 function normalizeRuntime<DB>(
   dbOrBinding: DB | FactoryBinding<DB>,
   adapter?: FactoryAdapter<DB>,
-  registry?: Map<Table, AutoFactory<Table, FactoryTransient>>,
+  registry?: Map<Table, AutoFactory<Table>>,
   relations?: RuntimeRelations,
   inference?: FactoryInferenceOptions<Table>,
 ): RuntimeBinding<DB> {
@@ -709,7 +404,7 @@ function normalizeRuntime<DB>(
 
 function withOptionalRegistry<DB>(
   binding: FactoryBinding<DB>,
-  registry?: Map<Table, AutoFactory<Table, FactoryTransient>>,
+  registry?: Map<Table, AutoFactory<Table>>,
   relations?: RuntimeRelations,
   inference?: FactoryInferenceOptions<Table>,
 ) {
@@ -733,50 +428,6 @@ function isFactoryBinding<DB>(value: DB | FactoryBinding<DB>): value is FactoryB
     "adapter" in value &&
     typeof (value as { adapter?: { create?: unknown } }).adapter?.create === "function",
   );
-}
-
-function normalizeStateInput<
-  TTable extends Table,
-  TTransient extends FactoryTransient = Record<string, never>,
->(input: FactoryStateInput<TTable, TTransient>) {
-  if (typeof input === "function") {
-    return input;
-  }
-
-  return async () => input;
-}
-
-function normalizeTrait<
-  TTable extends Table,
-  TTransient extends FactoryTransient = Record<string, never>,
->(definition: FactoryTraitDefinition<TTable, TTransient>): NormalizedTrait<TTable, TTransient> {
-  const trait = isTraitConfig(definition) ? definition : { state: definition };
-
-  return {
-    state: trait.state ? [normalizeStateInput(trait.state)] : [],
-    afterBuild: normalizeHooks(trait.afterBuild),
-    afterCreate: normalizeHooks(trait.afterCreate),
-  };
-}
-
-function isTraitConfig<
-  TTable extends Table,
-  TTransient extends FactoryTransient = Record<string, never>,
->(value: FactoryTraitDefinition<TTable, TTransient>): value is FactoryTrait<TTable, TTransient> {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    ("state" in value || "afterBuild" in value || "afterCreate" in value),
-  );
-}
-
-function normalizeHooks<T>(hooks: T | T[] | undefined): T[] {
-  if (!hooks) {
-    return [];
-  }
-
-  return Array.isArray(hooks) ? hooks : [hooks];
 }
 
 function resolveListOverrides<TTable extends Table>(
@@ -867,7 +518,6 @@ function inferColumnValue<TTable extends Table>(
   runtimeInference?: FactoryInferenceOptions<Table>,
 ): InferredValue {
   const metadata = column as InferenceMetadata;
-  const normalizedName = columnKey.toLowerCase();
   const sqlType = getColumnSqlType(column);
   const context = {
     column,
@@ -898,126 +548,14 @@ function inferColumnValue<TTable extends Table>(
     return explicit as InferredValue;
   }
 
-  const spatial = inferSpatialValue(sqlType, metadata.dataType, sequence);
+  const selectedGenerator = selectAutoSeedGenerator(table, columnKey);
 
-  if (spatial !== SKIP_VALUE) {
-    return spatial;
-  }
-
-  const enumValues = metadata.enumValues;
-  if (enumValues && enumValues.length > 0) {
-    return enumValues[Math.max(0, (sequence - 1) % enumValues.length)] ?? SKIP_VALUE;
-  }
-
-  const constrained = inferFromSimpleChecks(table, context, inference, runtimeInference);
-
-  if (constrained !== SKIP_VALUE) {
-    return constrained;
-  }
-
-  switch (metadata.dataType) {
-    case "number":
-      return sequence;
-    case "bigint":
-      return BigInt(sequence);
-    case "boolean":
-      return false;
-    case "json":
-      return {};
-    case "array":
-      return [];
-    case "buffer":
-      return new Uint8Array();
-    case "date":
-      return new Date(
-        `2026-01-${String(((sequence - 1) % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
-      );
-    case "localDate":
-      return `2026-01-${String(((sequence - 1) % 28) + 1).padStart(2, "0")}`;
-    case "localDateTime":
-      return `2026-01-${String(((sequence - 1) % 28) + 1).padStart(2, "0")}T12:00:00`;
-    case "localTime":
-      return `12:${String((sequence - 1) % 60).padStart(2, "0")}:00`;
-    case "string":
-      return inferStringValue(
-        tableName,
-        normalizedName,
-        sqlType,
-        metadata.columnType,
-        metadata.config?.length,
-        sequence,
-      );
-    default:
-      return SKIP_VALUE;
-  }
-}
-
-function inferStringValue(
-  tableName: string,
-  columnKey: string,
-  sqlType: string,
-  columnType: string | undefined,
-  maxLength: number | undefined,
-  sequence: number,
-) {
-  const applyLength = (value: string) =>
-    typeof maxLength === "number" ? value.slice(0, Math.max(0, maxLength)) : value;
-
-  if (columnType === "PgUUID" || normalizeSqlType(sqlType).toLowerCase() === "uuid") {
-    return applyLength(deterministicUuid(sequence));
-  }
-
-  if (columnKey.includes("email")) {
-    return applyLength(`${tableName}-${sequence}@example.com`);
-  }
-
-  if (columnKey.includes("url")) {
-    return applyLength(`https://example.com/${tableName}/${sequence}`);
-  }
-
-  if (columnKey.includes("phone")) {
-    return applyLength(`+155500${String(sequence).padStart(6, "0")}`);
-  }
-
-  if (columnKey.includes("token") || columnKey.includes("nonce")) {
-    return applyLength(`${columnKey}-${sequence.toString(36).padStart(8, "0")}`);
-  }
-
-  if (columnKey === "id") {
-    return applyLength(`${tableName}-${sequence}`);
-  }
-
-  if (columnKey.endsWith("id")) {
+  if (!selectedGenerator) {
     return SKIP_VALUE;
   }
 
-  return applyLength(`${tableName}-${columnKey}-${sequence}`);
-}
-
-function deterministicUuid(sequence: number) {
-  const suffix = sequence.toString(16).padStart(12, "0").slice(-12);
-  return `00000000-0000-4000-8000-${suffix}`;
-}
-
-function inferSpatialValue(sqlType: string, dataType: string | undefined, sequence: number) {
-  const normalizedSqlType = normalizeSqlType(sqlType).toLowerCase();
-
-  if (normalizedSqlType !== "point" && normalizedSqlType !== "geometry") {
-    return SKIP_VALUE;
-  }
-
-  if (dataType === "array") {
-    return [sequence, sequence + 1];
-  }
-
-  if (dataType === "json") {
-    return {
-      x: sequence,
-      y: sequence + 1,
-    };
-  }
-
-  return SKIP_VALUE;
+  return (evaluateAutoSeedGenerator(table, columnKey, column, selectedGenerator, sequence) ??
+    SKIP_VALUE) as InferredValue;
 }
 
 function resolveExplicitInference<TTable extends Table>(
@@ -1056,94 +594,6 @@ function resolveExplicitInference<TTable extends Table>(
   }
 
   return undefined;
-}
-
-function inferFromSimpleChecks<TTable extends Table>(
-  table: TTable,
-  context: FactoryInferenceContext<TTable>,
-  inference: FactoryInferenceOptions<TTable>,
-  runtimeInference?: FactoryInferenceOptions<Table>,
-): InferredValue {
-  const checksEnabled = inference.checks ?? runtimeInference?.checks ?? true;
-
-  if (!checksEnabled) {
-    return SKIP_VALUE;
-  }
-
-  const hints = getSimpleCheckHints(table).get(context.columnKey);
-
-  if (!hints) {
-    return SKIP_VALUE;
-  }
-
-  if (hints.allowedValues && hints.allowedValues.length > 0) {
-    return hints.allowedValues[Math.max(0, (context.sequence - 1) % hints.allowedValues.length)]!;
-  }
-
-  if (context.dataType === "number") {
-    const numeric = inferNumberFromCheckHints(hints, context.sequence);
-
-    if (numeric !== undefined) {
-      return numeric;
-    }
-  }
-
-  return SKIP_VALUE;
-}
-
-function inferNumberFromCheckHints(hints: SimpleCheckHints, sequence: number) {
-  const minBase =
-    hints.min === undefined
-      ? undefined
-      : hints.minExclusive
-        ? adjustExclusiveNumber(hints.min, "up")
-        : hints.min;
-  const maxBase =
-    hints.max === undefined
-      ? undefined
-      : hints.maxExclusive
-        ? adjustExclusiveNumber(hints.max, "down")
-        : hints.max;
-
-  if (minBase === undefined && maxBase === undefined) {
-    return undefined;
-  }
-
-  if (
-    minBase !== undefined &&
-    maxBase !== undefined &&
-    Number.isInteger(minBase) &&
-    Number.isInteger(maxBase)
-  ) {
-    if (minBase > maxBase) {
-      return undefined;
-    }
-
-    return minBase + ((sequence - 1) % Math.max(1, maxBase - minBase + 1));
-  }
-
-  if (minBase !== undefined && maxBase !== undefined) {
-    const midpoint = minBase + (maxBase - minBase) / 2;
-
-    if (midpoint > minBase && midpoint < maxBase) {
-      return midpoint;
-    }
-  }
-
-  if (minBase !== undefined) {
-    return minBase;
-  }
-
-  return maxBase;
-}
-
-function adjustExclusiveNumber(value: number, direction: "down" | "up") {
-  if (Number.isInteger(value)) {
-    return direction === "up" ? value + 1 : value - 1;
-  }
-
-  const delta = Math.max(Math.abs(value) * Number.EPSILON * 16, Number.EPSILON);
-  return direction === "up" ? value + delta : value - delta;
 }
 
 function getSimpleCheckHints(table: Table) {
@@ -1615,10 +1065,65 @@ function ensureSafeUniqueConstraints<TTable extends Table>(
 
     if (autoGeneratedColumnKeys.length > 0) {
       throw new Error(
-        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} still relies on auto-generated values for: ${autoGeneratedColumnKeys.join(", ")}. Provide explicit values through columns(f), defaults(...), state(...), for(...), or call-site overrides.`,
+        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} still relies on auto-generated values for: ${autoGeneratedColumnKeys.join(", ")}. Provide explicit values through columns(f), for(...), or call-site overrides.`,
       );
     }
   }
+}
+
+function ensureSimpleChecksSatisfied<TTable extends Table>(
+  table: TTable,
+  values: Partial<InferInsert<TTable>>,
+  inference: FactoryInferenceOptions<TTable>,
+  runtimeInference?: FactoryInferenceOptions<Table>,
+) {
+  const checksEnabled = inference.checks ?? runtimeInference?.checks ?? true;
+
+  if (!checksEnabled) {
+    return;
+  }
+
+  for (const [columnKey, hints] of getSimpleCheckHints(table)) {
+    if (!(columnKey in values)) {
+      continue;
+    }
+
+    const value = (values as Record<string, unknown>)[columnKey];
+
+    if (value === undefined || checkHintAllowsValue(hints, value)) {
+      continue;
+    }
+
+    throw new Error(
+      `Generated value for "${tableNameOf(table)}.${columnKey}" does not satisfy a simple CHECK constraint. Provide an explicit value through columns(f), an inference resolver, or a call-site override.`,
+    );
+  }
+}
+
+function checkHintAllowsValue(hints: SimpleCheckHints, value: unknown) {
+  if (hints.allowedValues && hints.allowedValues.length > 0) {
+    return hints.allowedValues.some((candidate) => candidate === value);
+  }
+
+  if (hints.nonEmptyString && typeof value === "string" && value.trim().length === 0) {
+    return false;
+  }
+
+  if (typeof value === "number") {
+    if (hints.min !== undefined) {
+      if (hints.minExclusive ? value <= hints.min : value < hints.min) {
+        return false;
+      }
+    }
+
+    if (hints.max !== undefined) {
+      if (hints.maxExclusive ? value >= hints.max : value > hints.max) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: string[]) {
@@ -1653,10 +1158,12 @@ function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: st
       return metadata?.dataType === "custom";
     })
   ) {
-    hints.push("customType(...) columns need an inference resolver or explicit state()/overrides.");
+    hints.push(
+      "customType(...) columns need an inference resolver, columns(f), or explicit overrides.",
+    );
   }
 
-  hints.push("Add overrides or refine the factory with state().");
+  hints.push("Add overrides or refine the factory with columns(f).");
 
   return hints.join(" ");
 }

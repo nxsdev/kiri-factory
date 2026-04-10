@@ -33,14 +33,20 @@ test/
 ```ts
 // src/db/factories/users.ts
 export const userFactory = defineFactory(users, {
-  defaults: {
+  columns: (f) => ({
     role: "member",
-  },
-  state: ({ seq }) => ({
-    email: `user-${seq}@example.com`,
-    nickname: `user-${seq}`,
+    email: f.email(),
+    nickname: f.string({ isUnique: true }),
   }),
 });
+
+// test/helpers/create-signed-in-user.ts
+export async function createSignedInUserRows(factories: ReturnType<typeof createTestFactories>) {
+  const user = await factories.users.create();
+  const session = await factories.sessions.for("user", user).create();
+
+  return { session, user };
+}
 
 // test/helpers/create-test-factories.ts
 export function createTestFactories(db: Db) {
@@ -59,4 +65,8 @@ export function createTestFactories(db: Db) {
 
 - schema inference covers most tables
 - shared definitions keep business-heavy tables readable
+- scenario helpers stay plain TypeScript
 - tests still create data from one connected runtime
+
+If a test wants nested relation data after setup, add a second helper that reads the rows
+back with `db.query(...with...)` instead of asking the factory itself to return a graph.

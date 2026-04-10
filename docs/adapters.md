@@ -83,6 +83,12 @@ Use this with a disposable database or transaction boundary.
 - duplicate explicit values on unique columns
 - non-trivial unique/index cases that still need disposable-DB confirmation
 
+What it is not:
+
+- a proof that every future insert will succeed
+- a replacement for scenario-level tests
+- a substitute for disposable-DB integration tests around complex constraints
+
 ## Transactions
 
 `create()` and `createMany()` are not wrapped in a transaction automatically.

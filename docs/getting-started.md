@@ -57,18 +57,20 @@ The mental model stays small:
 - `for(...)` for parent wiring
 
 If your schema object includes tables but no relation exports yet, `create()` still works for rows whose required fields can be satisfied directly.  
-When a child row needs a parent, create that parent explicitly and pass it through `for(...)`.
+`for(...)` only becomes available when the schema also exports relation metadata. Without relations metadata, pass foreign keys directly in the child row overrides.
 
 ## RQB v2
 
 Use the `rqb-v2` subpath when your project uses `defineRelations(...)`.
 
 ```ts
+import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { defineRelations } from "drizzle-orm";
 import { createFactories } from "kiri-factory/rqb-v2";
 import * as schema from "./db/schema";
 
+const client = new PGlite();
 const db = drizzle({ client });
 
 const relations = defineRelations(schema, (r) => ({
@@ -92,21 +94,25 @@ const author = await factories.users.create();
 const post = await factories.posts.for("author", author).create();
 ```
 
-## The Core Workflow
+## Factory vs Seed
 
-The intended flow is explicit:
+Use `kiri-factory` when a test wants explicit rows:
 
-```ts
-const user = await factories.users.create();
-const profile = await factories.profiles.for("user", user).create();
-const posts = await factories.posts.for("author", user).createMany(2);
-```
+- create one row at a time
+- reuse a known parent row with `for(...)`
+- keep return values predictable
 
-That keeps:
+Use `drizzle-seed` when you want bulk fake data:
 
-- the created table obvious
-- the reused row obvious
-- the returned value predictable
+- `count`
+- `with`
+- weighted random
+- seeded datasets shared across environments
+
+Official references:
+
+- [Drizzle `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
+- [Drizzle generator functions](https://orm.drizzle.team/docs/seed-functions)
 
 If your next step is customizing one table, continue with [Defining factories](./define-factory.md).  
 If your next step is relation wiring patterns, continue with [Relations](./relations.md).

@@ -19,14 +19,15 @@ See also:
 | `defineRelations(...)` via `kiri-factory/rqb-v2`               | Supported       | typed `for(...)` on child-side one-relations                   |
 | self relations and same-target relations                       | Supported       | use relation keys, not table names                             |
 | junction tables and composite primary keys                     | Supported       | preferred many-to-many path                                    |
-| simple single-column `CHECK`                                   | Best effort     | `>`, `>=`, `<`, `<=`, `BETWEEN`, `IN (...)`                    |
+| simple single-column `CHECK`                                   | Guardrail only  | parsed to reject invalid generated values, not to invent them  |
 | `customType(...)`                                              | Resolver-driven | add inference resolvers where needed                           |
-| Postgres `uuid` / `point`                                      | Built-in        | simple deterministic defaults                                  |
+| official `drizzle-seed`-supported PG/MySQL/SQLite selectors    | Supported       | auto generation follows official selector logic where possible |
+| official generators outside the auto selector                  | Explicit only   | use `columns(f)`; generator existence alone is not enough      |
 | single-column unique + shared `columns(f)`                     | Supported       | unique-safe `drizzle-seed` generators are enforced             |
 | composite foreign keys                                         | Explicit only   | use `for(...)` with an existing parent row or direct overrides |
 | compound / partial / expression unique constraints             | Explicit only   | do not rely on generic auto-generation                         |
 | direct many-to-many writes without a through row               | Not supported   | create the junction row explicitly                             |
-| complex `CHECK` SQL                                            | Manual override | use `state(...)`, overrides, or resolvers                      |
+| complex `CHECK` SQL                                            | Manual override | use `columns(f)`, overrides, or resolvers                      |
 | polymorphic relations                                          | Out of scope    | not part of `v0.1`                                             |
 
 ## What This Library Does Not Try To Do
@@ -54,6 +55,7 @@ Use explicit factory logic when:
 - your through table carries required payload columns
 - your table has compound, partial, or expression-based unique constraints
 - your custom types need domain-specific values
+- your type has an official generator but the official auto selector does not treat it as a safe generic default
 
 ## Composite Foreign Keys
 
@@ -84,12 +86,15 @@ Non-trivial uniqueness falls into the same bucket:
 Set the participating columns explicitly through:
 
 - `columns(f)`
-- `defaults(...)`
-- `state(...)`
 - `for(...)`
 - call-site overrides
 
 Then use `verifyCreates()` against a disposable database when you want real insert coverage.
+
+This is an intentional boundary.
+
+For non-trivial unique constraints, the factory should help you express the rows clearly,
+not pretend it can outsmart the database.
 
 `kiri-factory` only parses simple single-column `CHECK` constraints.
 
@@ -99,12 +104,14 @@ If your schema depends on:
 - driver functions inside `CHECK`
 - business rules encoded in arbitrary SQL
 - `customType(...)` values that need domain-aware data, such as driver-specific `point` mappings
+- types that official `drizzle-seed` selector logic does not support for that dialect
+- types with official generator docs but known selector/runtime edge cases, such as some `geometry(point)` configurations
 
 then treat inference as a starting point, not the source of truth.
 
 In those cases, prefer:
 
-- `state(...)`
+- `columns(f)`
 - call-time overrides
 - runtime or definition-level inference resolvers
 - `verifyCreates()` against a disposable database when you want real insert coverage

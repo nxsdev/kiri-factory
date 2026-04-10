@@ -1,13 +1,6 @@
 import type { AnyRelation, AnyRelations, InferSelectModel, One, Table } from "drizzle-orm";
 
-import type {
-  FactoryBuildHook,
-  FactoryCallOptions,
-  FactoryCreateHook,
-  FactoryOverrides,
-  FactoryStateInput,
-  FactoryTraitDefinition,
-} from "./core";
+import type { FactoryOverrides } from "./core";
 import type { FactoryDefinition } from "./define";
 import { drizzleReturning } from "./drizzle";
 import { tableNameOf } from "./rqb-v2-introspection";
@@ -21,17 +14,14 @@ import {
 
 type RelationsMap = AnyRelations;
 type TableMap = Record<string, Table>;
-type FactoryTransient = Record<string, unknown>;
 type DefinitionMap<TTables extends TableMap> = Partial<{
-  [K in keyof TTables]: FactoryDefinition<TTables[K], FactoryTransient>;
+  [K in keyof TTables]: FactoryDefinition<TTables[K]>;
 }>;
 type TablesFromRelations<TRelations extends RelationsMap> = {
   [K in keyof TRelations]: TRelations[K] extends { table: infer TTable extends Table }
     ? TTable
     : never;
 };
-type DefinitionTransient<TValue> =
-  TValue extends FactoryDefinition<Table, infer TTransient> ? TTransient : {};
 type RelationsForKey<
   TRelations extends RelationsMap,
   TKey extends keyof TRelations,
@@ -63,78 +53,41 @@ type RelationTargetTable<
   TRelations,
   Extract<RelationsForKey<TRelations, TKey>[TRelationKey], AnyRelation>
 >];
-type Simplify<T> = { [K in keyof T]: T[K] } & {};
 type RuntimeForKey<
   TRelations extends RelationsMap,
-  TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>>,
   TKey extends keyof TablesFromRelations<TRelations>,
 > = RuntimeFactory<
   TablesFromRelations<TRelations>[TKey],
-  TKey extends keyof TDefinitions ? DefinitionTransient<NonNullable<TDefinitions[TKey]>> : {},
   TRelations,
   Extract<TKey, keyof TRelations>
 >;
 
 export interface RuntimeFactory<
   TTable extends Table,
-  TTransient extends Record<string, unknown> = {},
   TRelations extends RelationsMap = {},
   TKey extends keyof TRelations = never,
-> extends FactoryDefinition<TTable, TTransient> {
-  defaults(
-    overrides: FactoryOverrides<TTable>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  transient<TNextTransient extends FactoryTransient>(
-    defaults: TNextTransient,
-  ): RuntimeFactory<TTable, Simplify<TTransient & TNextTransient>, TRelations, TKey>;
-  state(
-    input: FactoryStateInput<TTable, TTransient>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  trait(
-    name: string,
-    definition: FactoryTraitDefinition<TTable, TTransient>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  withTraits(...names: string[]): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  afterBuild(
-    hook: FactoryBuildHook<TTable, TTransient>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  afterCreate(
-    hook: FactoryCreateHook<TTable, TTransient>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
-  create(
-    overrides?: FactoryOverrides<TTable>,
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<InferSelectModel<TTable>>;
+> extends FactoryDefinition<TTable> {
+  create(overrides?: FactoryOverrides<TTable>): Promise<InferSelectModel<TTable>>;
   createMany(
     count: number,
     overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
-    options?: FactoryCallOptions<TTransient>,
   ): Promise<InferSelectModel<TTable>[]>;
-  buildMany(
-    count: number,
-    overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<import("drizzle-orm").InferInsertModel<TTable>[]>;
   for<TRelationKey extends OneRelationKeys<TRelations, TKey>>(
     relation: TRelationKey,
-    input?: InferSelectModel<RelationTargetTable<TRelations, TKey, TRelationKey>>,
-  ): RuntimeFactory<TTable, TTransient, TRelations, TKey>;
+    input: InferSelectModel<RelationTargetTable<TRelations, TKey, TRelationKey>>,
+  ): RuntimeFactory<TTable, TRelations, TKey>;
 }
 
-export type FactoryRegistry<
-  TRelations extends RelationsMap,
-  TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>> = {},
-> = {
-  [K in keyof TablesFromRelations<TRelations>]: RuntimeForKey<TRelations, TDefinitions, K>;
+export type FactoryRegistry<TRelations extends RelationsMap> = {
+  [K in keyof TablesFromRelations<TRelations>]: RuntimeForKey<TRelations, K>;
 } & {
   get<TKey extends keyof TablesFromRelations<TRelations>>(
     key: TKey,
-  ): RuntimeForKey<TRelations, TDefinitions, TKey>;
+  ): RuntimeForKey<TRelations, TKey>;
   get<TTable extends TablesFromRelations<TRelations>[keyof TablesFromRelations<TRelations>]>(
     table: TTable,
   ): RuntimeForKey<
     TRelations,
-    TDefinitions,
     Extract<
       {
         [K in keyof TablesFromRelations<TRelations>]-?: TablesFromRelations<TRelations>[K] extends TTable
@@ -165,27 +118,22 @@ export function createFactories<
   DB,
   TRelations extends RelationsMap,
   TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>> = {},
->(
-  options: CreateFactoriesOptions<DB, TRelations, TDefinitions>,
-): FactoryRegistry<TRelations, TDefinitions> {
+>(options: CreateFactoriesOptions<DB, TRelations, TDefinitions>): FactoryRegistry<TRelations> {
   const runtimeRelations = extractRuntimeRelationsFromRqbV2(options.relations);
   const tables = collectTables(options.relations, runtimeRelations);
   const binding: FactoryBinding<unknown> = {
     db: options.db,
     adapter: options.adapter ?? drizzleReturning<unknown>(),
   };
-  const connected = connectRuntimeRegistry(
-    binding as Parameters<typeof connectRuntimeRegistry>[0],
-    tables as unknown as Parameters<typeof connectRuntimeRegistry>[1],
-    options.definitions as unknown as Parameters<typeof connectRuntimeRegistry>[2],
-    options.inference as unknown as Parameters<typeof connectRuntimeRegistry>[3],
-    runtimeRelations as Parameters<typeof connectRuntimeRegistry>[4],
+  const connected = connectRqbV2Registry(
+    binding,
+    tables,
+    options.definitions,
+    options.inference,
+    runtimeRelations,
   );
 
-  return attachRegistryHelpers(
-    connected,
-    tables as unknown as Parameters<typeof attachRegistryHelpers>[1],
-  ) as unknown as FactoryRegistry<TRelations, TDefinitions>;
+  return attachRqbV2RegistryHelpers(connected, tables) as unknown as FactoryRegistry<TRelations>;
 }
 
 function collectTables(
@@ -227,6 +175,32 @@ function registerTableCandidate(tables: TableMap, table: Table) {
   }
 
   tables[key] = table;
+}
+
+function connectRqbV2Registry(
+  binding: FactoryBinding<unknown>,
+  tables: TableMap,
+  definitions: DefinitionMap<TableMap> | undefined,
+  inference: FactoryInferenceOptions<Table> | undefined,
+  runtimeRelations: ReturnType<typeof extractRuntimeRelationsFromRqbV2>,
+) {
+  return connectRuntimeRegistry(
+    binding as unknown as Parameters<typeof connectRuntimeRegistry>[0],
+    tables as unknown as Parameters<typeof connectRuntimeRegistry>[1],
+    definitions as unknown as Parameters<typeof connectRuntimeRegistry>[2],
+    inference as unknown as Parameters<typeof connectRuntimeRegistry>[3],
+    runtimeRelations as unknown as Parameters<typeof connectRuntimeRegistry>[4],
+  );
+}
+
+function attachRqbV2RegistryHelpers(
+  registry: ReturnType<typeof connectRuntimeRegistry>,
+  tables: TableMap,
+) {
+  return attachRegistryHelpers(
+    registry,
+    tables as unknown as Parameters<typeof attachRegistryHelpers>[1],
+  );
 }
 
 export type { FactoryLintIssue } from "../../../src/internal/runtime-registry";

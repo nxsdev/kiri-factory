@@ -20,24 +20,25 @@ const post = await factories.posts.for("author", author).create();
 const session = await factories.sessions.for("user", author).create();
 ```
 
-If you omit the second argument, `kiri-factory` creates the parent row for you.
+Both arguments are required:
 
-```ts
-const post = await factories.posts.for("author").create();
-```
+- the relation key
+- the already-created parent row
+
+This keeps ownership, tenancy, and reused parents explicit.
 
 ## Return Values
 
 `create()` returns the row for the table you called.
 
 ```ts
-const post = await factories.posts.for("author").create();
+const post = await factories.posts.for("author", author).create();
 ```
 
 `createMany(count)` returns an array of rows for that table.
 
 ```ts
-const posts = await factories.posts.for("author").createMany(3);
+const posts = await factories.posts.for("author", author).createMany(3);
 ```
 
 This is intentional. The library helps you connect rows, but it does not change the shape of the returned row into a nested relation object.

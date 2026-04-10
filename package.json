@@ -1,7 +1,7 @@
 {
   "name": "kiri-factory",
   "version": "0.1.0",
-  "description": "Inferred, schema-driven Drizzle factories for real database tests and complex relation graphs",
+  "description": "Schema-driven Drizzle factories for explicit test rows and relation wiring",
   "keywords": [
     "drizzle",
     "drizzle-orm",

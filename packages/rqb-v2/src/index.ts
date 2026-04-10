@@ -9,6 +9,8 @@ export {
 export {
   type FactoryAdapter,
   type FactoryBinding,
+  type FactoryColumnsDefinition,
+  type FactoryColumnValue,
   type FactoryInferenceContext,
   type FactoryInferenceOptions,
   type FactoryInferenceResolver,

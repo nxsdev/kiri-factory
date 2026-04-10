@@ -6,15 +6,14 @@ See also:
 - [Getting started](./getting-started.md)
 - [Inference and `CHECK` support](./inference.md)
 - [Relations](./relations.md)
+- [Official `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
+- [Official generator functions](https://orm.drizzle.team/docs/seed-functions)
 
 `createFactories(...)` gives you auto-generated factories from schema metadata.
 
 Use `defineFactory(...)` when one table needs shared logic:
 
-- shared `drizzle-seed` column generators
-- defaults
-- traits
-- transient inputs
+- shared columns
 - custom inference
 - build-time behavior without a connected DB
 
@@ -24,28 +23,27 @@ Use `defineFactory(...)` when one table needs shared logic:
 import { defineFactory } from "kiri-factory";
 
 const userFactory = defineFactory(users, {
-  defaults: {
+  columns: (f) => ({
     role: "member",
-  },
-  state: ({ seq }) => ({
-    email: `user-${seq}@example.com`,
-    nickname: `user-${seq}`,
+    email: f.email(),
+    nickname: f.string({ isUnique: true }),
   }),
-  traits: {
-    admin: {
-      state: {
-        role: "admin",
-      },
-    },
-  },
 });
 
-const built = await userFactory.withTraits("admin").build();
+const built = await userFactory.build({
+  role: "admin",
+});
 ```
+
+In practice, `columns` should be the default place you reach for first.
+
+- use `columns` for shared fixed values and shared drizzle-seed generators
+- use call-site overrides for one-off differences
+- use plain helper functions when a business scenario spans multiple tables
 
 ## Sharing Official `drizzle-seed` Generators
 
-If you already use `drizzle-seed`, keep its official `refine((f) => ...)` shape as the source of truth for shared column generators.
+If you already use `drizzle-seed`, keep its official `refine((f) => ...)` shape as the source of truth for shared columns.
 
 ```ts
 import { seed } from "drizzle-seed";
@@ -53,6 +51,7 @@ import { defineFactory } from "kiri-factory";
 
 const customerFactory = defineFactory(customers, {
   columns: (f) => ({
+    status: "active",
     companyName: f.companyName(),
     contactName: f.fullName(),
     contactEmail: f.email(),
@@ -78,10 +77,14 @@ Use this when:
 `columns(f)` reuses the same public drizzle-seed generator helpers that the official
 `refine((f) => ...)` examples use. Runtime factories do not embed the full seeding engine.
 
-See also:
+This works because `columns(f)` receives the same public generator surface that
+official `drizzle-seed` examples use. If a generator exists in official docs,
+you can use that generator explicitly in `columns(f)`.
 
-- [Getting started](./getting-started.md)
-- [Inference and `CHECK` support](./inference.md)
+The important distinction is:
+
+- explicit `columns(f)` usage is encouraged
+- plain auto inference only covers the narrower selector path that kiri-factory can keep predictable
 
 ## Pure Definitions
 
@@ -91,38 +94,14 @@ Definitions are pure:
 - `buildMany()` works without a DB
 - `create()` belongs to the connected runtime returned by `createFactories(...)`
 
-## Recommended Hierarchy
-
-To keep one source of truth per concern:
-
-- put shared column generators in `columns(f)`
-- use `defaults` for small fixed literals
-- use `state(...)` for runtime-dependent values
-- use `traits` as named overlays, not as a second place to redefine everything
-
-## Transient Inputs
-
-Transient values are available inside `state(...)` but are never persisted.
+If you only need fixed values, `columns` can be a plain object:
 
 ```ts
 const userFactory = defineFactory(users, {
-  transient: {
-    domain: "example.com",
+  columns: {
+    role: "member",
   },
-  state: ({ seq, transient }) => ({
-    email: `user-${seq}@${transient.domain}`,
-    nickname: `user-${seq}`,
-  }),
 });
-
-const built = await userFactory.build(
-  {},
-  {
-    transient: {
-      domain: "kiri.dev",
-    },
-  },
-);
 ```
 
 ## Mixing Auto and Explicit Factories
@@ -131,7 +110,7 @@ You do not need to define every table up front.
 
 ```ts
 const userFactory = defineFactory(users, {
-  defaults: {
+  columns: {
     role: "admin",
   },
 });
@@ -168,5 +147,5 @@ await factories.get("users").create();
 await factories.get(users).create();
 ```
 
-If you want to attach related rows after this point, continue with [Relations](./relations.md).  
+If you want multi-row scenario helpers, continue with [Shared definitions in large test suites](./recipes/shared-definitions.md).  
 If your definition needs custom inferred values, continue with [Inference and `CHECK` support](./inference.md).

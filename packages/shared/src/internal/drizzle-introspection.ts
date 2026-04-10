@@ -131,8 +131,17 @@ function getInlineForeignKeys(table: Table) {
 }
 
 export function columnKeyOf(table: Table, target: Column) {
+  const targetName = (target as Column & { name?: unknown }).name;
+
   for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
     if (column === target) {
+      return columnKey;
+    }
+
+    if (
+      typeof targetName === "string" &&
+      (column as Column & { name?: unknown }).name === targetName
+    ) {
       return columnKey;
     }
   }

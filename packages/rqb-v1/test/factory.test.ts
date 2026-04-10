@@ -11,8 +11,10 @@ import { mysqlTable, varchar as mysqlVarchar } from "drizzle-orm/mysql-core";
 import {
   check,
   customType,
+  foreignKey,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   serial,
   text,
@@ -84,6 +86,43 @@ const sessionsRelations = relations(sessions, ({ one }) => ({
   user: one(users, {
     fields: [sessions.userId],
     references: [users.id],
+  }),
+}));
+
+const orderVersions = pgTable(
+  "order_versions",
+  {
+    orderId: integer("order_id").notNull(),
+    version: integer("version").notNull(),
+    note: varchar("note", { length: 32 }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.orderId, table.version],
+    }),
+  }),
+);
+const orderVersionLines = pgTable(
+  "order_version_lines",
+  {
+    orderId: integer("order_id").notNull(),
+    version: integer("version").notNull(),
+    sku: varchar("sku", { length: 16 }).notNull(),
+  },
+  (table) => ({
+    versionFk: foreignKey({
+      columns: [table.orderId, table.version],
+      foreignColumns: [orderVersions.orderId, orderVersions.version],
+    }),
+  }),
+);
+const orderVersionsRelations = relations(orderVersions, ({ many }) => ({
+  lines: many(orderVersionLines),
+}));
+const orderVersionLinesRelations = relations(orderVersionLines, ({ one }) => ({
+  orderVersion: one(orderVersions, {
+    fields: [orderVersionLines.orderId, orderVersionLines.version],
+    references: [orderVersions.orderId, orderVersions.version],
   }),
 }));
 
@@ -272,6 +311,16 @@ const floatingReadings = pgTable(
   ],
 );
 
+const pairedScores = pgTable(
+  "paired_scores",
+  {
+    id: serial("id").primaryKey(),
+    minScore: integer("min_score").notNull(),
+    maxScore: integer("max_score").notNull(),
+  },
+  (table) => [check("paired_scores_order_check", sql`${table.minScore} < ${table.maxScore}`)],
+);
+
 const sqliteConstrainedNotes = sqliteTable(
   "sqlite_constrained_notes",
   {
@@ -405,6 +454,22 @@ describe("kiri-factory", () => {
     expect(overriddenRow.embedding).toEqual([100]);
   });
 
+  it("explains when unresolved required columns come from customType inference", async () => {
+    const factories = createFactories({
+      db: {},
+      tables: { embeddings },
+      adapter: echoAdapter([]),
+    });
+
+    await expect(
+      factories.embeddings.create({
+        label: "Missing embedding",
+      }),
+    ).rejects.toThrow(
+      /customType\(\.\.\.\) columns need an inference resolver or explicit state\(\)\/overrides\./,
+    );
+  });
+
   it("creates rows through the connected runtime without extra setup calls", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
@@ -447,6 +512,27 @@ describe("kiri-factory", () => {
 
     expect(built.rating).toBe(1);
     expect(built.status).toBe("constrained_articles-status-1");
+  });
+
+  it("surfaces complex CHECK failures as database errors during insert", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      tables: { pairedScores },
+    });
+
+    let error: Error | undefined;
+
+    try {
+      await factories.pairedScores.create();
+    } catch (caught) {
+      error = caught as Error;
+    }
+
+    expect(error).toBeDefined();
+    expect(error?.message).not.toContain(
+      'Could not auto-resolve required columns for "paired_scores"',
+    );
   });
 
   it("supports mixed exclusive numeric bounds in simple CHECK parsing", async () => {
@@ -851,6 +937,42 @@ describe("kiri-factory", () => {
 
     expect(post.authorId).toBe(log[0]?.values.id);
     expect(log.map((entry) => entry.table)).toEqual(["mysql_users", "mysql_posts"]);
+  });
+
+  it("fills composite foreign keys through explicit relation planning", async () => {
+    const log: Array<{ table: string; values: Record<string, unknown> }> = [];
+    const factories = createFactories({
+      db: {},
+      schema: {
+        orderVersions,
+        orderVersionLines,
+        orderVersionsRelations,
+        orderVersionLinesRelations,
+      },
+      adapter: echoAdapter(log),
+    });
+
+    const line = await factories.orderVersionLines.for("orderVersion").create({
+      sku: "SKU-1",
+    });
+
+    expect(line.orderId).toBe(log[0]?.values.orderId);
+    expect(line.version).toBe(log[0]?.values.version);
+    expect(log.map((entry) => entry.table)).toEqual(["order_versions", "order_version_lines"]);
+  });
+
+  it("explains that table-only fallback does not auto-create composite foreign keys", async () => {
+    const factories = createFactories({
+      db: {},
+      tables: { orderVersions, orderVersionLines },
+      adapter: echoAdapter([]),
+    });
+
+    await expect(
+      factories.orderVersionLines.create({
+        sku: "SKU-2",
+      }),
+    ).rejects.toThrow(/Composite foreign keys are not auto-created by the table-only fallback\./);
   });
 
   it("supports has-one relation planning for SQLite schemas with a custom adapter", async () => {
@@ -1261,18 +1383,25 @@ async function createTestDb() {
       expires_at timestamptz not null
     );
 
-    create table constrained_articles (
-      id serial primary key,
-      rating integer not null,
-      status text not null,
-      constraint constrained_articles_rating_check check (rating >= 3 and rating <= 5),
-      constraint constrained_articles_status_check check (status in ('draft', 'published'))
-    );
+      create table constrained_articles (
+        id serial primary key,
+        rating integer not null,
+        status text not null,
+        constraint constrained_articles_rating_check check (rating >= 3 and rating <= 5),
+        constraint constrained_articles_status_check check (status in ('draft', 'published'))
+      );
 
-    create table members (
-      id serial primary key,
-      name text not null
-    );
+      create table paired_scores (
+        id serial primary key,
+        min_score integer not null,
+        max_score integer not null,
+        constraint paired_scores_order_check check (min_score < max_score)
+      );
+
+      create table members (
+        id serial primary key,
+        name text not null
+      );
 
     create table groups (
       id serial primary key,

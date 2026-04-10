@@ -40,6 +40,14 @@ const reviewFactory = defineFactory(reviews, {
 });
 ```
 
+What this does not try to parse:
+
+- multi-column `CHECK`
+- complex SQL expressions or DB functions
+- business logic that only makes sense at the application level
+
+Complex `CHECK` expressions are not parsed. When they matter, failures usually surface as database constraint errors during insert, not as kiri-factory required-column inference errors.
+
 You can disable `CHECK` parsing for one definition or one runtime:
 
 ```ts
@@ -91,5 +99,5 @@ const embeddingFactory = defineFactory(embeddings, {
 - if Drizzle exposes clear metadata, `kiri-factory` should infer it
 - if your schema encodes business rules in arbitrary SQL or driver-specific mapping, use explicit factory logic
 
-If you need to turn inferred rows into persisted rows on non-standard drivers, continue with [Adapters, dialects, and runtime behavior](./adapters.md).  
-If you want the exact support boundaries, continue with [Compatibility and limits](./compatibility.md).
+If your main concern is composite foreign keys or other support boundaries, continue with [Compatibility and limits](./compatibility.md).  
+If you want concrete setup patterns, continue with [Composite foreign keys](./recipes/composite-foreign-keys.md) or the rest of the [Recipes](./recipes/README.md).

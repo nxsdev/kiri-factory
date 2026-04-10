@@ -39,3 +39,4 @@ If you are using Drizzle RQB v2 already, read [Getting started](./getting-starte
 - you need a custom adapter or care about runtime write behavior: [Adapters, dialects, and runtime behavior](./adapters.md)
 - you want the support boundaries first: [Compatibility and limits](./compatibility.md)
 - you want concrete real-world examples: [Recipes](./recipes/README.md)
+- your child row depends on multiple foreign-key columns: [Composite foreign keys](./recipes/composite-foreign-keys.md)

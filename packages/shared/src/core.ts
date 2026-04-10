@@ -10,6 +10,7 @@ import { drizzleReturning } from "./drizzle";
 import { extractRuntimeRelations } from "./internal/drizzle-relations";
 import {
   getChecks,
+  getForeignKeys,
   qualifiedTableNameOf,
   getSingleColumnForeignKeys,
   isTable,
@@ -1333,7 +1334,7 @@ function inferAutoValues<TTable extends Table>(
   const tableName = qualifiedTableNameOf(table);
   const values: Record<string, unknown> = {};
   const foreignKeyColumns = new Set(
-    getSingleColumnForeignKeys(table).map((foreignKey) => foreignKey.localKey),
+    getForeignKeys(table).flatMap((foreignKey) => foreignKey.localKeys),
   );
   const relationColumns = new Set(relationOwnedKeys);
 
@@ -2076,7 +2077,36 @@ function ensureRequiredColumns<TTable extends Table>(
 
   if (missing.length > 0) {
     throw new Error(
-      `Could not auto-resolve required columns for "${tableNameOf(table)}": ${missing.join(", ")}. Add overrides or refine the factory with state().`,
+      `Could not auto-resolve required columns for "${tableNameOf(table)}": ${missing.join(", ")}. ${buildMissingColumnHint(table, missing)}`,
     );
   }
+}
+
+function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: string[]) {
+  const columns = getTableColumns(table) as Record<string, Column>;
+  const hints: string[] = [];
+  const compositeForeignKeyColumns = new Set(
+    getForeignKeys(table)
+      .filter((foreignKey) => foreignKey.localKeys.length > 1)
+      .flatMap((foreignKey) => foreignKey.localKeys),
+  );
+
+  if (missing.some((columnKey) => compositeForeignKeyColumns.has(columnKey))) {
+    hints.push(
+      "Composite foreign keys are not auto-created by the table-only fallback. Use explicit relation planning, existing(...), or direct overrides for the full key.",
+    );
+  }
+
+  if (
+    missing.some((columnKey) => {
+      const metadata = columns[columnKey] as InferenceMetadata | undefined;
+      return metadata?.dataType === "custom";
+    })
+  ) {
+    hints.push("customType(...) columns need an inference resolver or explicit state()/overrides.");
+  }
+
+  hints.push("Add overrides or refine the factory with state().");
+
+  return hints.join(" ");
 }

@@ -115,6 +115,8 @@ const post = await factories.posts.create();
 This mode is intentionally narrow:
 
 - only for simple foreign keys that can be read safely
+- composite foreign keys are intentionally excluded from this fallback
+- use explicit relation planning when a parent key spans multiple columns
 - mainly a fallback
 - not the main graph API
 

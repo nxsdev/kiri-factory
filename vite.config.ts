@@ -16,13 +16,7 @@ export default defineConfig({
     },
   },
   staged: {
-    "{README.md,package.json,pnpm-workspace.yaml,tsconfig.json,vite.config.ts}":
-      "pnpm exec vp check --fix",
-    "docs/**/*.md": "pnpm exec vp check --fix",
-    "packages/shared/**/*.{ts,md,json}":
-      "pnpm exec vp check --fix && pnpm --dir packages/rqb-v1 exec vp check && pnpm --dir packages/rqb-v2 exec vp check",
-    "packages/rqb-v1/**/*.{ts,md,json}": "pnpm --dir packages/rqb-v1 exec vp check --fix",
-    "packages/rqb-v2/**/*.{ts,md,json}": "pnpm --dir packages/rqb-v2 exec vp check --fix",
+    "**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}": "vp check --fix",
   },
   lint: {
     ignorePatterns: ["dist/**", ".tmp/**", "packages/**"],

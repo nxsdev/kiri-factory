@@ -74,19 +74,6 @@ Requirements:
 | `kiri-factory`        | your project uses stable `relations(...)` |
 | `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
 
-## Many-to-many
-
-Use the junction table explicitly in both stable and RQB v2.
-
-```ts
-const user = await factories.users.create();
-const group = await factories.groups.create();
-
-const membership = await factories.memberships.for("user", user).for("group", group).create({
-  role: "owner",
-});
-```
-
 ## What It Does
 
 - `build()` / `buildMany()` for in-memory rows
@@ -145,11 +132,9 @@ The docs are split into small Markdown files so humans and agents can jump direc
 - [Getting started](./docs/getting-started.md)
 - [Defining factories](./docs/define-factory.md)
 - [Relations](./docs/relations.md)
-- [Many-to-many patterns](./docs/many-to-many.md)
 - [Inference and `CHECK` support](./docs/inference.md)
 - [Adapters and transactions](./docs/adapters.md)
 - [Compatibility and limits](./docs/compatibility.md)
-- [Recipes](./docs/recipes/README.md)
 
 ## Development
 

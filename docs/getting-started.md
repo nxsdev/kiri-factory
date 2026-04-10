@@ -5,7 +5,7 @@ See also:
 - [Docs index](./README.md)
 - [Defining factories](./define-factory.md)
 - [Relations](./relations.md)
-- [Many-to-many patterns](./many-to-many.md)
+- [Compatibility and limits](./compatibility.md)
 
 ## Which Entrypoint Should I Use?
 

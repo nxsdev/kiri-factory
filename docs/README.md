@@ -13,23 +13,20 @@ That makes them easier to:
 - [Getting started](./getting-started.md)
 - [Defining factories](./define-factory.md)
 - [Relations](./relations.md)
-- [Many-to-many patterns](./many-to-many.md)
 - [Inference and `CHECK` support](./inference.md)
 - [Adapters and transactions](./adapters.md)
 - [Compatibility and limits](./compatibility.md)
-- [Recipes](./recipes/README.md)
 
 ## Quick Links By Situation
 
 - first install or first runtime: [Getting started](./getting-started.md)
 - one table needs shared column definitions: [Defining factories](./define-factory.md)
 - you want to connect rows by relation name: [Relations](./relations.md)
-- your schema uses junction tables: [Many-to-many patterns](./many-to-many.md)
+- your schema uses junction tables: [Relations](./relations.md)
 - you want to understand what is inferred: [Inference and `CHECK` support](./inference.md)
 - you need a custom adapter or transaction pattern: [Adapters and transactions](./adapters.md)
 - you want support boundaries first: [Compatibility and limits](./compatibility.md)
-- you want concrete real-world examples: [Recipes](./recipes/README.md)
-- your child row depends on multiple foreign-key columns: [Composite foreign keys](./recipes/composite-foreign-keys.md)
+- your child row depends on multiple foreign-key columns: [Relations](./relations.md)
 
 ## Official `drizzle-seed` Docs
 

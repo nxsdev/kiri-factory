@@ -11,20 +11,42 @@ See also:
 
 The default adapter uses Drizzle's `insert(...).values(...).returning()` flow.
 
-That means:
+In practice, that means:
 
-- it works well with drivers that support `returning()`
-- for non-returning drivers, you should pass a custom adapter
+- PostgreSQL and SQLite are the easiest fit for the default adapter
+- if your driver does not expose the inserted row through `returning()`, pass a custom adapter
+
+Official references:
+
+- [Drizzle insert docs](https://orm.drizzle.team/docs/insert)
+- [Drizzle MySQL getting started](https://orm.drizzle.team/docs/get-started-mysql)
+
+As of the current Drizzle docs:
+
+- PostgreSQL and SQLite show normal `returning()` examples
+- MySQL does not have native `RETURNING` for full inserted rows
+- Drizzle offers `$returningId()` on MySQL when you only need inserted primary keys
+
+So the rule is:
+
+- you want the inserted row back and your stack supports `returning()`: default adapter is fine
+- you only get inserted ids or driver-specific metadata back: use a custom adapter and read the row back yourself
 
 ## Custom Adapter
 
 ```ts
+import { eq } from "drizzle-orm";
+import { createFactories } from "kiri-factory";
+
 const factories = createFactories({
   db,
   schema: { users },
   adapter: {
-    async create({ values }) {
-      return values as typeof values & { id: number };
+    async create({ db, table, values }) {
+      const result = await db.insert(table).values(values);
+      const insertedId = extractInsertedId(result);
+      const [row] = await db.select().from(table).where(eq(table.id, insertedId));
+      return row!;
     },
   },
 });
@@ -35,6 +57,12 @@ For real drivers without `returning()`, the usual pattern is:
 1. insert the row
 2. read it back with the driver's preferred API
 3. return the persisted row
+
+Use a custom adapter when:
+
+- you use MySQL and want `create()` to return the full inserted row
+- your driver returns inserted ids or metadata instead of row objects
+- your primary key is available after insert, but the rest of the row must be queried
 
 ## Dialect Coverage
 
@@ -93,8 +121,23 @@ What it is not:
 
 `create()` and `createMany()` are not wrapped in a transaction automatically.
 
-If your setup needs atomicity, wrap the sequence in your own transaction boundary.  
-See [Wrapping factory setup in a transaction](./recipes/transactions.md).
+If your setup needs atomicity, wrap the sequence in your own transaction boundary.
+
+```ts
+await db.transaction(async (tx) => {
+  const factories = createFactories({
+    db: tx,
+    schema,
+  });
+
+  const user = await factories.users.create({
+    email: "graph@example.com",
+  });
+
+  await factories.posts.for("author", user).createMany(2);
+  await factories.sessions.for("user", user).create();
+});
+```
 
 If you need to understand what values are inferred before persistence, continue with [Inference and `CHECK` support](./inference.md).  
 If you want the supported feature matrix, continue with [Compatibility and limits](./compatibility.md).

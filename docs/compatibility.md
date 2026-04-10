@@ -4,7 +4,7 @@ See also:
 
 - [Docs index](./README.md)
 - [Relations](./relations.md)
-- [Many-to-many patterns](./many-to-many.md)
+- [Adapters and transactions](./adapters.md)
 - [Inference and `CHECK` support](./inference.md)
 
 `kiri-factory` is intentionally broad, but not magical.
@@ -72,8 +72,6 @@ If your child row depends on multiple columns:
 - pass that row to `for(...)`
 - or override the full key directly
 
-For a concrete pattern, continue with [Composite foreign keys](./recipes/composite-foreign-keys.md).
-
 ## Complex Constraints
 
 Non-trivial uniqueness falls into the same bucket:
@@ -117,4 +115,4 @@ In those cases, prefer:
 - `verifyCreates()` against a disposable database when you want real insert coverage
 
 If your main concern is custom persistence or transaction boundaries, continue with [Adapters and transactions](./adapters.md).  
-If your main concern is many-to-many API choice, continue with [Many-to-many patterns](./many-to-many.md).
+If your main concern is relation wiring patterns, continue with [Relations](./relations.md).

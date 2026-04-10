@@ -58,8 +58,6 @@ const customerFactory = defineFactory(customers, {
   }),
 });
 
-const customer = await customerFactory.build();
-
 await seed(db, schema).refine((f) => ({
   customers: {
     count: 1000,
@@ -132,6 +130,40 @@ This gives you:
 - auto-generated factories for tables without definitions
 - custom behavior only where you need it
 
+## Shared Definitions In Large Test Suites
+
+In larger suites, a common pattern is:
+
+1. keep `defineFactory(...)` files close to schema or domain code
+2. create one connected runtime per test or test module
+3. let most tables stay auto-generated
+4. only define factories for domain-heavy tables
+
+```ts
+// src/db/factories/users.ts
+export const userFactory = defineFactory(users, {
+  columns: (f) => ({
+    role: "member",
+    email: f.email(),
+    nickname: f.string({ isUnique: true }),
+  }),
+});
+
+// test/helpers/create-test-factories.ts
+export function createTestFactories(db: Db) {
+  return createFactories({
+    db,
+    schema,
+    definitions: {
+      users: userFactory,
+    },
+  });
+}
+```
+
+If a scenario spans several tables, keep that orchestration in a normal helper
+function instead of adding another DSL layer.
+
 ## Looking Up Factories
 
 Property access is the common path:
@@ -147,5 +179,4 @@ await factories.get("users").create();
 await factories.get(users).create();
 ```
 
-If you want multi-row scenario helpers, continue with [Shared definitions in large test suites](./recipes/shared-definitions.md).  
 If your definition needs custom inferred values, continue with [Inference and `CHECK` support](./inference.md).

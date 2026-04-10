@@ -4,7 +4,6 @@ See also:
 
 - [Docs index](./README.md)
 - [Getting started](./getting-started.md)
-- [Many-to-many patterns](./many-to-many.md)
 - [Compatibility and limits](./compatibility.md)
 
 ## `for(...)`
@@ -26,6 +25,31 @@ Both arguments are required:
 - the already-created parent row
 
 This keeps ownership, tenancy, and reused parents explicit.
+
+## Reusing One Parent Row
+
+If several rows should belong to the same parent, create the parent once and keep
+passing that row back into `for(...)`.
+
+```ts
+const author = await factories.users.create({
+  email: "author@example.com",
+});
+
+const first = await factories.posts.for("author", author).create({
+  title: "First",
+});
+
+const second = await factories.posts.for("author", author).create({
+  title: "Second",
+});
+```
+
+This keeps:
+
+- parent reuse explicit at the call site
+- ownership and tenancy visible in tests
+- `createMany()` predictable when several children share one parent
 
 ## Return Values
 
@@ -71,6 +95,60 @@ const employee = await factories.employees.for("manager", manager).create({
 });
 ```
 
+## Many-to-Many
+
+Use the junction table explicitly.
+
+```ts
+const user = await factories.users.create();
+const group = await factories.groups.create();
+
+const membership = await factories.memberships.for("user", user).for("group", group).create({
+  role: "owner",
+});
+```
+
+This is the recommended write path in both:
+
+- stable `relations(...)`
+- `kiri-factory/rqb-v2` with `defineRelations(...)`
+
+If the through row has business meaning or required payload columns, explicit junction-table
+creation stays the clearest option.
+
+```ts
+await factories.memberships.for("member", member).for("group", group).create({
+  role: "owner",
+});
+```
+
+This avoids hiding:
+
+- required payload columns
+- timestamps or roles on the through row
+- the row you may actually assert on later
+
+## Composite Foreign Keys
+
+Composite foreign keys work best when you use explicit relation planning.
+
+```ts
+const version = await factories.orderVersions.create({
+  orderId: 100,
+  version: 3,
+});
+
+const line = await factories.orderVersionLines.for("orderVersion", version).create({
+  sku: "SKU-1",
+});
+```
+
+When relation metadata knows every owned key, `for(...)` copies the full composite key
+from the parent row.
+
+What does not work generically is a plain `create()` with missing composite parent keys.
+In that case, create the parent first or override the full key directly.
+
 ## Step-by-Step Trees
 
 For deeper trees, keep the setup explicit.
@@ -104,5 +182,4 @@ This is intentional:
 - the row you create is the row you asked for
 - missing foreign keys fail fast instead of silently creating unrelated parents
 
-If you are working on many-to-many specifically, continue with [Many-to-many patterns](./many-to-many.md).  
 If you want support boundaries before using a pattern in production tests, continue with [Compatibility and limits](./compatibility.md).

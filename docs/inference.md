@@ -205,4 +205,4 @@ const factories = createFactories({
 - if your schema encodes business rules in arbitrary SQL or driver-specific mapping, use explicit factory logic
 
 If your main concern is composite foreign keys or other support boundaries, continue with [Compatibility and limits](./compatibility.md).  
-If you want concrete setup patterns, continue with [Composite foreign keys](./recipes/composite-foreign-keys.md) or the rest of the [Recipes](./recipes/README.md).
+If you want concrete setup patterns, continue with [Relations](./relations.md) or [Adapters and transactions](./adapters.md).

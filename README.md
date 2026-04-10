@@ -1,6 +1,6 @@
 # kiri-factory
 
-Schema-driven factories for Drizzle ORM, built for real database tests and complex relation graphs.
+Inferred, schema-driven factories for Drizzle ORM, built for real database tests and complex relation graphs.
 
 `kiri-factory` is aimed at the point where direct `db.insert(...)` calls and ad-hoc test helpers start to break down:
 
@@ -10,6 +10,15 @@ Schema-driven factories for Drizzle ORM, built for real database tests and compl
 - projects that want one factory layer instead of many one-off helpers
 
 It gives you one connected runtime for test data creation and one pure definition layer for shared factory logic.
+
+The main value is inference.
+
+- reads table metadata and fills common required columns automatically
+- respects enums, varchar length, nullability, defaults, and generated columns
+- can infer simple foreign-key parents without a hand-written factory for every table
+- lets you start from `createFactories({ db, schema })` and add explicit definitions only where your domain needs them
+
+That matters most when your schema is large enough that writing raw `insert(...)` values becomes the test itself.
 
 - main entrypoint: `createFactories({ db, tables | schema, definitions? })`
 - shared declarations: `defineFactory(table, options?)`

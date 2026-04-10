@@ -1,12 +1,14 @@
 {
   "name": "kiri-factory",
   "version": "0.1.0",
-  "description": "Schema-driven Drizzle factories for real database tests and complex relation graphs",
+  "description": "Inferred, schema-driven Drizzle factories for real database tests and complex relation graphs",
   "keywords": [
     "drizzle",
     "drizzle-orm",
     "factory",
+    "inference",
     "pglite",
+    "schema-driven",
     "testing"
   ],
   "homepage": "https://github.com/nxsdev/kiri-factory",

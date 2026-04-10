@@ -1,0 +1,60 @@
+{
+  "name": "kiri-factory",
+  "version": "0.1.0",
+  "description": "Connected runtime factories for Drizzle ORM",
+  "keywords": [
+    "drizzle",
+    "drizzle-orm",
+    "factory",
+    "pglite",
+    "testing"
+  ],
+  "homepage": "https://github.com/kiri-factory/kiri-factory",
+  "bugs": {
+    "url": "https://github.com/kiri-factory/kiri-factory/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kiri-factory/kiri-factory.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "check": "vp check",
+    "prepublishOnly": "pnpm check && pnpm test && pnpm build",
+    "test": "vp test run",
+    "test:watch": "vp test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.4.4",
+    "drizzle-orm": "^0.45.2",
+    "typescript": "^6.0.2",
+    "vite-plus": "^0.1.16"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.45.2 <0.46.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "packageManager": "pnpm@10.4.1"
+}

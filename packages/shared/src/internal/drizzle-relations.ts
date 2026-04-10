@@ -9,21 +9,11 @@ import {
 } from "drizzle-orm";
 
 import { columnKeyOf, getForeignKeys, getPrimaryKeyKeys } from "./drizzle-introspection";
-
-export interface RuntimeRelationMetadata {
-  key: string;
-  kind: "one" | "many";
-  sourceOwnsForeignKey: boolean;
-  sourceTable: Table;
-  sourceKeys: string[];
-  targetTable: Table;
-  targetKeys: string[];
-}
-
-export interface RuntimeRelations {
-  bySourceTable: Map<Table, Map<string, RuntimeRelationMetadata>>;
-  get(sourceTable: Table, key: string): RuntimeRelationMetadata | undefined;
-}
+import {
+  createRuntimeRelations,
+  type RuntimeRelationMetadata,
+  type RuntimeRelations,
+} from "./runtime-relations";
 
 export function extractRuntimeRelations(
   schema: Record<string, unknown>,
@@ -32,7 +22,7 @@ export function extractRuntimeRelations(
     schema,
     createTableRelationsHelpers,
   );
-  const bySourceTable = new Map<Table, Map<string, RuntimeRelationMetadata>>();
+  const metadataEntries: RuntimeRelationMetadata[] = [];
 
   for (const tableConfig of Object.values(tables)) {
     for (const [key, relation] of Object.entries(tableConfig.relations)) {
@@ -75,24 +65,11 @@ export function extractRuntimeRelations(
         targetTable,
         targetKeys,
       };
-      const tableRelations =
-        bySourceTable.get(sourceTable) ?? new Map<string, RuntimeRelationMetadata>();
-
-      tableRelations.set(key, metadata);
-      bySourceTable.set(sourceTable, tableRelations);
+      metadataEntries.push(metadata);
     }
   }
 
-  if (bySourceTable.size === 0) {
-    return undefined;
-  }
-
-  return {
-    bySourceTable,
-    get(sourceTable, key) {
-      return bySourceTable.get(sourceTable)?.get(key);
-    },
-  };
+  return createRuntimeRelations(metadataEntries);
 }
 
 function sourceOwnsForeignKey(

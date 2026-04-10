@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+catalog:
+  "@electric-sql/pglite": ^0.4.4
+  typescript: ^6.0.2
+  vite-plus: ^0.1.16
+catalogs:
+  rqb-v1:
+    drizzle-orm: ^0.45.2
+  rqb-v2:
+    drizzle-orm: 1.0.0-beta.21

@@ -7,13 +7,21 @@ import {
 } from "drizzle-orm";
 
 import { drizzleReturning } from "./drizzle";
+import { extractRuntimeRelations } from "./internal/drizzle-relations";
 import {
-  extractRuntimeRelations,
-  type RuntimeRelationMetadata,
-  type RuntimeRelations,
-} from "./internal/drizzle-relations";
-import { getSingleColumnForeignKeys, isTable, tableNameOf } from "./internal/drizzle-introspection";
-import type { FactoryAdapter, FactoryBinding } from "./types";
+  getChecks,
+  qualifiedTableNameOf,
+  getSingleColumnForeignKeys,
+  isTable,
+  tableNameOf,
+} from "./internal/drizzle-introspection";
+import { type RuntimeRelationMetadata, type RuntimeRelations } from "./internal/runtime-relations";
+import type {
+  FactoryAdapter,
+  FactoryBinding,
+  FactoryInferenceContext,
+  FactoryInferenceOptions,
+} from "./types";
 
 const SKIP_VALUE = Symbol("kiri-factory.skip");
 export const FACTORY_INSTANCE = Symbol("kiri-factory.instance");
@@ -38,6 +46,7 @@ type UntypedOverrides = Record<string, unknown>;
 const EXISTING_ROW = Symbol("kiri-factory.existing-row");
 
 type RuntimeBinding<DB = unknown> = FactoryBinding<DB> & {
+  inference?: FactoryInferenceOptions<Table>;
   registry?: Map<Table, AutoFactory<Table, FactoryTransient>>;
   relations?: RuntimeRelations;
 };
@@ -197,6 +206,7 @@ type ResolvedExecution<TTable extends Table, TTransient extends FactoryTransient
 type InternalState<TTable extends Table, TTransient extends FactoryTransient = {}> = {
   table: TTable;
   sequence: SequenceTracker;
+  inference: FactoryInferenceOptions<TTable>;
   runtime?: RuntimeBinding;
   hasRelations: HasRelationPlan[];
   forRelations: ForRelationPlan[];
@@ -212,6 +222,31 @@ type InternalState<TTable extends Table, TTransient extends FactoryTransient = {
   afterCreateHooks: FactoryCreateHook<TTable, TTransient>[];
   transientDefaults: Partial<TTransient>;
 };
+
+type InferenceMetadata = Column & {
+  notNull?: boolean;
+  hasDefault?: boolean;
+  dataType?: string;
+  columnType?: string;
+  config?: {
+    length?: number;
+  };
+  enumValues?: string[];
+  generated?: { type?: string };
+  generatedIdentity?: { type?: string };
+  getSQLType?: () => string;
+};
+
+type SimpleCheckHints = {
+  allowedValues?: Array<boolean | number | string>;
+  max?: number;
+  maxExclusive?: boolean;
+  min?: number;
+  minExclusive?: boolean;
+  nonEmptyString?: boolean;
+};
+
+const simpleCheckCache = new WeakMap<Table, Map<string, SimpleCheckHints>>();
 
 type ListOverridesInput<TTable extends Table> =
   | FactoryOverrides<TTable>
@@ -284,6 +319,7 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
         options?.adapter,
         this.#state.runtime?.registry,
         this.#state.runtime?.relations,
+        this.#state.runtime?.inference,
       ),
     });
   }
@@ -644,6 +680,8 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
       this.#state.table,
       seq,
       getRelationOwnedColumnKeys(this.#state.table, this.#state.runtime?.relations),
+      this.#state.inference,
+      this.#state.runtime?.inference,
     );
 
     for (const resolver of this.#collectStateResolvers()) {
@@ -830,6 +868,10 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
           : isFactoryInstance(plan.input)
             ? plan.input
             : childFactory;
+
+      if (!relation.through) {
+        this.#assertChildFactoryDoesNotOverrideOwnedKeys(relation, plannedChildFactory);
+      }
       const createdChildren: UntypedGraphNode[] = [];
 
       for (let index = 0; index < plan.count; index += 1) {
@@ -837,15 +879,17 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
           ...resolveUntypedListOverrides(plan.overrides, index),
         };
 
-        for (
-          let relationIndex = 0;
-          relationIndex < relation.sourceKeys.length;
-          relationIndex += 1
-        ) {
-          const sourceKey = relation.sourceKeys[relationIndex]!;
-          const targetKey = relation.targetKeys[relationIndex]!;
+        if (!relation.through) {
+          for (
+            let relationIndex = 0;
+            relationIndex < relation.sourceKeys.length;
+            relationIndex += 1
+          ) {
+            const sourceKey = relation.sourceKeys[relationIndex]!;
+            const targetKey = relation.targetKeys[relationIndex]!;
 
-          overrides[targetKey] = (row as Record<string, unknown>)[sourceKey];
+            overrides[targetKey] = (row as Record<string, unknown>)[sourceKey];
+          }
         }
 
         const childGraph = graph
@@ -857,11 +901,20 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
           : undefined;
 
         if (!graph) {
-          await plannedChildFactory.#createInternal(overrides as FactoryOverrides<Table>, {}, [
-            ...path,
-            this.#state.table,
-          ]);
+          const childRow = await plannedChildFactory.#createInternal(
+            overrides as FactoryOverrides<Table>,
+            {},
+            [...path, this.#state.table],
+          );
+
+          if (relation.through) {
+            await this.#createThroughRow(relation, row, childRow, path);
+          }
         } else if (childGraph) {
+          if (relation.through) {
+            await this.#createThroughRow(relation, row, childGraph.row, path);
+          }
+
           createdChildren.push(childGraph);
         }
       }
@@ -875,6 +928,78 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
           graph[plan.relationKey] = createdChildren;
         }
       }
+    }
+  }
+
+  async #createThroughRow(
+    relation: RuntimeRelationMetadata,
+    sourceRow: InferSelect<TTable>,
+    targetRow: Record<string, unknown>,
+    path: Table[],
+  ) {
+    if (!relation.through || !this.#state.runtime?.registry) {
+      return;
+    }
+
+    const throughFactory = this.#state.runtime.registry.get(relation.through.table);
+
+    if (!throughFactory) {
+      throw new Error(
+        `Relation "${relation.key}" on "${tableNameOf(this.#state.table)}" requires through table "${tableNameOf(relation.through.table)}", but that table is not registered in this runtime.`,
+      );
+    }
+
+    const overrides: Record<string, unknown> = {};
+
+    for (let index = 0; index < relation.sourceKeys.length; index += 1) {
+      const sourceKey = relation.sourceKeys[index]!;
+      const throughKey = relation.through.sourceKeys[index]!;
+
+      overrides[throughKey] = (sourceRow as Record<string, unknown>)[sourceKey];
+    }
+
+    for (let index = 0; index < relation.targetKeys.length; index += 1) {
+      const targetKey = relation.targetKeys[index]!;
+      const throughKey = relation.through.targetKeys[index]!;
+
+      overrides[throughKey] = targetRow[targetKey];
+    }
+
+    await throughFactory.#createInternal(overrides as FactoryOverrides<Table>, {}, [
+      ...path,
+      this.#state.table,
+      relation.targetTable,
+    ]);
+  }
+
+  #assertChildFactoryDoesNotOverrideOwnedKeys(
+    relation: RuntimeRelationMetadata,
+    childFactory: AutoFactory<Table, FactoryTransient>,
+  ) {
+    const runtimeRelations = childFactory.#state.runtime?.relations;
+
+    if (!runtimeRelations) {
+      return;
+    }
+
+    const ownedKeys = new Set(relation.targetKeys);
+
+    for (const plan of childFactory.#state.forRelations) {
+      const childRelation = runtimeRelations.get(childFactory.#state.table, plan.relationKey);
+
+      if (!childRelation || childRelation.through || !childRelation.sourceOwnsForeignKey) {
+        continue;
+      }
+
+      const overlappingKeys = childRelation.sourceKeys.filter((key) => ownedKeys.has(key));
+
+      if (overlappingKeys.length === 0) {
+        continue;
+      }
+
+      throw new Error(
+        `Relation "${relation.key}" on "${tableNameOf(this.#state.table)}" already owns child keys ${overlappingKeys.join(", ")} on "${tableNameOf(childFactory.#state.table)}". Remove the reciprocal for("${plan.relationKey}") plan from the child factory.`,
+      );
     }
   }
 
@@ -937,10 +1062,16 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
 /**
  * Creates a schema-driven factory for one Drizzle table.
  */
-export function fromTable<TTable extends Table>(table: TTable) {
+export function fromTable<TTable extends Table>(
+  table: TTable,
+  options: {
+    inference?: FactoryInferenceOptions<TTable>;
+  } = {},
+) {
   return new AutoFactory<TTable>({
     table,
     sequence: new SequenceTracker(),
+    inference: options.inference ?? {},
     hasRelations: [],
     forRelations: [],
     traits: {},
@@ -1004,6 +1135,7 @@ function attachRegistryHelpers(
         options?.adapter,
         undefined,
         runtimeRelations,
+        undefined,
       );
       const connected: Record<string, unknown> = {};
 
@@ -1054,6 +1186,7 @@ function normalizeRuntime<DB>(
   adapter?: FactoryAdapter<DB>,
   registry?: Map<Table, AutoFactory<Table, FactoryTransient>>,
   relations?: RuntimeRelations,
+  inference?: FactoryInferenceOptions<Table>,
 ): RuntimeBinding<DB> {
   if (isFactoryBinding(dbOrBinding)) {
     return withOptionalRegistry(
@@ -1062,6 +1195,7 @@ function normalizeRuntime<DB>(
       },
       registry ?? (dbOrBinding as RuntimeBinding<DB>).registry,
       relations ?? (dbOrBinding as RuntimeBinding<DB>).relations,
+      inference ?? (dbOrBinding as RuntimeBinding<DB>).inference,
     );
   }
 
@@ -1072,6 +1206,7 @@ function normalizeRuntime<DB>(
     },
     registry,
     relations,
+    inference,
   );
 }
 
@@ -1079,13 +1214,15 @@ function withOptionalRegistry<DB>(
   binding: FactoryBinding<DB>,
   registry?: Map<Table, AutoFactory<Table, FactoryTransient>>,
   relations?: RuntimeRelations,
+  inference?: FactoryInferenceOptions<Table>,
 ) {
-  if (!registry && !relations) {
+  if (!registry && !relations && !inference) {
     return binding as RuntimeBinding<DB>;
   }
 
   return {
     ...binding,
+    inference,
     registry,
     relations,
   } as RuntimeBinding<DB>;
@@ -1190,8 +1327,10 @@ function inferAutoValues<TTable extends Table>(
   table: TTable,
   sequence: number,
   relationOwnedKeys: string[] = [],
+  inference: FactoryInferenceOptions<TTable> = {},
+  runtimeInference?: FactoryInferenceOptions<Table>,
 ) {
-  const tableName = tableNameOf(table);
+  const tableName = qualifiedTableNameOf(table);
   const values: Record<string, unknown> = {};
   const foreignKeyColumns = new Set(
     getSingleColumnForeignKeys(table).map((foreignKey) => foreignKey.localKey),
@@ -1203,7 +1342,15 @@ function inferAutoValues<TTable extends Table>(
       continue;
     }
 
-    const inferred = inferColumnValue(tableName, columnKey, column, sequence);
+    const inferred = inferColumnValue(
+      table,
+      tableName,
+      columnKey,
+      column,
+      sequence,
+      inference,
+      runtimeInference,
+    );
 
     if (inferred !== SKIP_VALUE) {
       values[columnKey] = inferred;
@@ -1243,25 +1390,28 @@ function isFactoryInstance(value: unknown): value is AutoFactory<Table, FactoryT
   );
 }
 
-function inferColumnValue(
+function inferColumnValue<TTable extends Table>(
+  table: TTable,
   tableName: string,
   columnKey: string,
   column: Column,
   sequence: number,
+  inference: FactoryInferenceOptions<TTable>,
+  runtimeInference?: FactoryInferenceOptions<Table>,
 ): InferredValue {
-  const metadata = column as Column & {
-    notNull?: boolean;
-    hasDefault?: boolean;
-    dataType?: string;
-    columnType?: string;
-    config?: {
-      length?: number;
-    };
-    enumValues?: string[];
-    generated?: { type?: string };
-    generatedIdentity?: { type?: string };
-  };
+  const metadata = column as InferenceMetadata;
   const normalizedName = columnKey.toLowerCase();
+  const sqlType = getColumnSqlType(column);
+  const context = {
+    column,
+    columnKey,
+    columnType: metadata.columnType,
+    dataType: metadata.dataType,
+    sequence,
+    sqlType,
+    table,
+    tableName,
+  } satisfies FactoryInferenceContext<Table>;
 
   if (metadata.generated?.type || metadata.generatedIdentity?.type) {
     return SKIP_VALUE;
@@ -1275,9 +1425,21 @@ function inferColumnValue(
     return SKIP_VALUE;
   }
 
+  const explicit = resolveExplicitInference(context, inference, runtimeInference);
+
+  if (explicit !== undefined) {
+    return explicit as InferredValue;
+  }
+
   const enumValues = metadata.enumValues;
   if (enumValues && enumValues.length > 0) {
     return enumValues[Math.max(0, (sequence - 1) % enumValues.length)] ?? SKIP_VALUE;
+  }
+
+  const constrained = inferFromSimpleChecks(table, context, inference, runtimeInference);
+
+  if (constrained !== SKIP_VALUE) {
+    return constrained;
   }
 
   switch (metadata.dataType) {
@@ -1360,6 +1522,498 @@ function inferStringValue(
 function deterministicUuid(sequence: number) {
   const suffix = sequence.toString(16).padStart(12, "0").slice(-12);
   return `00000000-0000-4000-8000-${suffix}`;
+}
+
+function resolveExplicitInference<TTable extends Table>(
+  context: FactoryInferenceContext<TTable>,
+  inference: FactoryInferenceOptions<TTable>,
+  runtimeInference?: FactoryInferenceOptions<Table>,
+) {
+  const columnKeys = [qualifyColumnKey(context.tableName, context.columnKey), context.columnKey];
+
+  for (const key of columnKeys) {
+    const resolver = inference.columns?.[key] ?? runtimeInference?.columns?.[key];
+    const value = resolver?.(context);
+
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  if (context.dataType !== "custom") {
+    return undefined;
+  }
+
+  const sqlType = context.sqlType;
+  const normalizedSqlType = normalizeSqlType(sqlType);
+  const customKeys = [sqlType, normalizedSqlType, context.columnType].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+
+  for (const key of customKeys) {
+    const resolver = inference.customTypes?.[key] ?? runtimeInference?.customTypes?.[key];
+    const value = resolver?.(context);
+
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function inferFromSimpleChecks<TTable extends Table>(
+  table: TTable,
+  context: FactoryInferenceContext<TTable>,
+  inference: FactoryInferenceOptions<TTable>,
+  runtimeInference?: FactoryInferenceOptions<Table>,
+): InferredValue {
+  const checksEnabled = inference.checks ?? runtimeInference?.checks ?? true;
+
+  if (!checksEnabled) {
+    return SKIP_VALUE;
+  }
+
+  const hints = getSimpleCheckHints(table).get(context.columnKey);
+
+  if (!hints) {
+    return SKIP_VALUE;
+  }
+
+  if (hints.allowedValues && hints.allowedValues.length > 0) {
+    return hints.allowedValues[Math.max(0, (context.sequence - 1) % hints.allowedValues.length)]!;
+  }
+
+  if (context.dataType === "number") {
+    const numeric = inferNumberFromCheckHints(hints, context.sequence);
+
+    if (numeric !== undefined) {
+      return numeric;
+    }
+  }
+
+  return SKIP_VALUE;
+}
+
+function inferNumberFromCheckHints(hints: SimpleCheckHints, sequence: number) {
+  const minBase =
+    hints.min === undefined
+      ? undefined
+      : hints.minExclusive
+        ? adjustExclusiveNumber(hints.min, "up")
+        : hints.min;
+  const maxBase =
+    hints.max === undefined
+      ? undefined
+      : hints.maxExclusive
+        ? adjustExclusiveNumber(hints.max, "down")
+        : hints.max;
+
+  if (minBase === undefined && maxBase === undefined) {
+    return undefined;
+  }
+
+  if (
+    minBase !== undefined &&
+    maxBase !== undefined &&
+    Number.isInteger(minBase) &&
+    Number.isInteger(maxBase)
+  ) {
+    if (minBase > maxBase) {
+      return undefined;
+    }
+
+    return minBase + ((sequence - 1) % Math.max(1, maxBase - minBase + 1));
+  }
+
+  if (minBase !== undefined && maxBase !== undefined) {
+    const midpoint = minBase + (maxBase - minBase) / 2;
+
+    if (midpoint > minBase && midpoint < maxBase) {
+      return midpoint;
+    }
+  }
+
+  if (minBase !== undefined) {
+    return minBase;
+  }
+
+  return maxBase;
+}
+
+function adjustExclusiveNumber(value: number, direction: "down" | "up") {
+  if (Number.isInteger(value)) {
+    return direction === "up" ? value + 1 : value - 1;
+  }
+
+  const delta = Math.max(Math.abs(value) * Number.EPSILON * 16, Number.EPSILON);
+  return direction === "up" ? value + delta : value - delta;
+}
+
+function getSimpleCheckHints(table: Table) {
+  const cached = simpleCheckCache.get(table);
+
+  if (cached) {
+    return cached;
+  }
+
+  const byColumn = new Map<string, SimpleCheckHints>();
+
+  for (const check of getChecks(table)) {
+    const parsed = parseSimpleCheck(table, check as { value?: unknown });
+
+    if (!parsed) {
+      continue;
+    }
+
+    const current = byColumn.get(parsed.columnKey);
+    byColumn.set(parsed.columnKey, mergeCheckHints(current, parsed.hints));
+  }
+
+  simpleCheckCache.set(table, byColumn);
+  return byColumn;
+}
+
+function parseSimpleCheck(table: Table, check: { value?: unknown }) {
+  const expression = renderSimpleCheckExpression(table, check.value);
+
+  if (!expression) {
+    return undefined;
+  }
+
+  const normalized = expression.replace(/\s+/g, " ").trim();
+  const rangeMatch =
+    /^(__kfcol\{[^}]+\}__)\s*(>=|>)\s*(.+)\s+AND\s+\1\s*(<=|<)\s*(.+)$/i.exec(normalized) ??
+    /^(__kfcol\{[^}]+\}__)\s*(<=|<)\s*(.+)\s+AND\s+\1\s*(>=|>)\s*(.+)$/i.exec(normalized);
+
+  if (rangeMatch) {
+    const columnKey = extractCheckColumnKey(rangeMatch[1]!);
+    const lowerFirst = rangeMatch[2] === ">" || rangeMatch[2] === ">=";
+    const lowerOperator = lowerFirst ? rangeMatch[2]! : rangeMatch[4]!;
+    const upperOperator = lowerFirst ? rangeMatch[4]! : rangeMatch[2]!;
+    const lower = parseCheckLiteral(lowerFirst ? rangeMatch[3]! : rangeMatch[5]!);
+    const upper = parseCheckLiteral(lowerFirst ? rangeMatch[5]! : rangeMatch[3]!);
+
+    if (columnKey && typeof lower === "number" && typeof upper === "number") {
+      return {
+        columnKey,
+        hints: mergeCheckHints(
+          { min: lower, minExclusive: lowerOperator === ">" },
+          { max: upper, maxExclusive: upperOperator === "<" },
+        ),
+      };
+    }
+  }
+
+  const betweenMatch = /^(__kfcol\{[^}]+\}__)\s+BETWEEN\s+(.+)\s+AND\s+(.+)$/i.exec(normalized);
+
+  if (betweenMatch) {
+    const columnKey = extractCheckColumnKey(betweenMatch[1]!);
+    const lower = parseCheckLiteral(betweenMatch[2]!);
+    const upper = parseCheckLiteral(betweenMatch[3]!);
+
+    if (columnKey && typeof lower === "number" && typeof upper === "number") {
+      return {
+        columnKey,
+        hints: { max: upper, min: lower },
+      };
+    }
+  }
+
+  const comparisonMatch = /^(__kfcol\{[^}]+\}__)\s*(<=|>=|<|>)\s*(.+)$/i.exec(normalized);
+
+  if (comparisonMatch) {
+    const columnKey = extractCheckColumnKey(comparisonMatch[1]!);
+    const value = parseCheckLiteral(comparisonMatch[3]!);
+
+    if (columnKey && typeof value === "number") {
+      return {
+        columnKey,
+        hints:
+          comparisonMatch[2] === ">"
+            ? { min: value, minExclusive: true }
+            : comparisonMatch[2] === ">="
+              ? { min: value }
+              : comparisonMatch[2] === "<"
+                ? { max: value, maxExclusive: true }
+                : { max: value },
+      };
+    }
+  }
+
+  const inMatch = /^(__kfcol\{[^}]+\}__)\s+IN\s*\((.+)\)$/i.exec(normalized);
+
+  if (inMatch) {
+    const columnKey = extractCheckColumnKey(inMatch[1]!);
+    const values = splitCheckList(inMatch[2]!)
+      .map(parseCheckLiteral)
+      .filter((value): value is boolean | number | string => value !== undefined);
+
+    if (columnKey && values.length > 0) {
+      return {
+        columnKey,
+        hints: { allowedValues: values },
+      };
+    }
+  }
+
+  const nonEmptyMatch =
+    /^(?:btrim\()?(?:__kfcol\{[^}]+\}__)(?:\))?\s*(?:<>|!=)\s*''$/i.exec(normalized) ??
+    /^''\s*(?:<>|!=)\s*(?:btrim\()?(?:__kfcol\{[^}]+\}__)(?:\))?$/i.exec(normalized);
+
+  if (nonEmptyMatch) {
+    const columnKeyMatch = /(__kfcol\{[^}]+\}__)/.exec(normalized);
+    const columnKey = columnKeyMatch ? extractCheckColumnKey(columnKeyMatch[1]!) : undefined;
+
+    if (columnKey) {
+      return {
+        columnKey,
+        hints: { nonEmptyString: true },
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function renderSimpleCheckExpression(table: Table, value: unknown): string | undefined {
+  return renderCheckChunk(table, value as { queryChunks?: unknown[] });
+}
+
+function renderCheckChunk(table: Table, chunk: unknown): string | undefined {
+  if (chunk === undefined) {
+    return "";
+  }
+
+  if (typeof chunk === "string") {
+    return chunk;
+  }
+
+  if (Array.isArray(chunk)) {
+    const parts = chunk
+      .map((value) => renderCheckChunk(table, value))
+      .filter((value): value is string => value !== undefined);
+
+    return parts.join("");
+  }
+
+  if (typeof chunk !== "object" || chunk === null) {
+    return renderCheckLiteral(chunk);
+  }
+
+  if ("queryChunks" in chunk && Array.isArray((chunk as { queryChunks?: unknown[] }).queryChunks)) {
+    return renderCheckChunk(table, (chunk as { queryChunks: unknown[] }).queryChunks);
+  }
+
+  if ("value" in chunk && Array.isArray((chunk as { value?: string[] }).value)) {
+    return (chunk as { value: string[] }).value.join("");
+  }
+
+  const columnKey = columnKeyFromCheckChunk(table, chunk);
+
+  if (columnKey) {
+    return qualifyCheckColumnMarker(columnKey);
+  }
+
+  if ("value" in chunk && "encoder" in chunk) {
+    return renderCheckLiteral((chunk as { value: unknown }).value);
+  }
+
+  return undefined;
+}
+
+function columnKeyFromCheckChunk(table: Table, chunk: unknown) {
+  if (typeof chunk !== "object" || chunk === null) {
+    return undefined;
+  }
+
+  const candidateName = "name" in chunk ? (chunk as { name?: unknown }).name : undefined;
+
+  if (typeof candidateName !== "string") {
+    return undefined;
+  }
+
+  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+    if ((column as { name?: string }).name === candidateName) {
+      return columnKey;
+    }
+  }
+
+  return undefined;
+}
+
+function renderCheckLiteral(value: unknown) {
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  if (typeof value === "string") {
+    return `'${value.replaceAll("'", "''")}'`;
+  }
+
+  return undefined;
+}
+
+function parseCheckLiteral(raw: string) {
+  const value = raw.trim();
+
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return Number(value);
+  }
+
+  if (/^(true|false)$/i.test(value)) {
+    return value.toLowerCase() === "true";
+  }
+
+  const stringMatch = /^'(.*)'$/s.exec(value) ?? /^"(.*)"$/s.exec(value);
+
+  if (stringMatch) {
+    return stringMatch[1]!.replaceAll("''", "'");
+  }
+
+  return undefined;
+}
+
+function splitCheckList(raw: string) {
+  const result: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | undefined;
+
+  for (const character of raw) {
+    if (quote) {
+      current += character;
+
+      if (character === quote) {
+        quote = undefined;
+      }
+
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      current += character;
+      continue;
+    }
+
+    if (character === ",") {
+      result.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (current.trim().length > 0) {
+    result.push(current.trim());
+  }
+
+  return result;
+}
+
+function mergeCheckHints(
+  current: SimpleCheckHints | undefined,
+  next: SimpleCheckHints,
+): SimpleCheckHints {
+  const merged: SimpleCheckHints = {
+    ...current,
+    ...next,
+  };
+
+  if (current?.nonEmptyString || next.nonEmptyString) {
+    merged.nonEmptyString = true;
+  }
+
+  if (current?.min !== undefined && next.min !== undefined) {
+    if (next.min > current.min) {
+      merged.min = next.min;
+      if (next.minExclusive !== undefined) {
+        merged.minExclusive = next.minExclusive;
+      } else {
+        delete merged.minExclusive;
+      }
+    } else if (next.min === current.min) {
+      const minExclusive = current.minExclusive || next.minExclusive;
+
+      if (minExclusive !== undefined) {
+        merged.minExclusive = minExclusive;
+      } else {
+        delete merged.minExclusive;
+      }
+    } else {
+      merged.min = current.min;
+      if (current.minExclusive !== undefined) {
+        merged.minExclusive = current.minExclusive;
+      } else {
+        delete merged.minExclusive;
+      }
+    }
+  }
+
+  if (current?.max !== undefined && next.max !== undefined) {
+    if (next.max < current.max) {
+      merged.max = next.max;
+      if (next.maxExclusive !== undefined) {
+        merged.maxExclusive = next.maxExclusive;
+      } else {
+        delete merged.maxExclusive;
+      }
+    } else if (next.max === current.max) {
+      const maxExclusive = current.maxExclusive || next.maxExclusive;
+
+      if (maxExclusive !== undefined) {
+        merged.maxExclusive = maxExclusive;
+      } else {
+        delete merged.maxExclusive;
+      }
+    } else {
+      merged.max = current.max;
+      if (current.maxExclusive !== undefined) {
+        merged.maxExclusive = current.maxExclusive;
+      } else {
+        delete merged.maxExclusive;
+      }
+    }
+  }
+
+  if (current?.allowedValues && next.allowedValues) {
+    const nextSet = new Set(next.allowedValues.map((value) => JSON.stringify(value)));
+    merged.allowedValues = current.allowedValues.filter((value) =>
+      nextSet.has(JSON.stringify(value)),
+    );
+  }
+
+  return merged;
+}
+
+function qualifyColumnKey(tableName: string, columnKey: string) {
+  return `${tableName}.${columnKey}`;
+}
+
+function qualifyCheckColumnMarker(columnKey: string) {
+  return `__kfcol{${columnKey}}__`;
+}
+
+function extractCheckColumnKey(marker: string) {
+  const match = /^__kfcol\{([^}]+)\}__$/.exec(marker);
+  return match?.[1];
+}
+
+function normalizeSqlType(sqlType: string) {
+  return sqlType.replace(/\s*\(.*\)\s*$/, "");
+}
+
+function getColumnSqlType(column: Column) {
+  try {
+    return (column as InferenceMetadata).getSQLType?.() ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined) {

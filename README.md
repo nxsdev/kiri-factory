@@ -14,8 +14,9 @@ It gives you one connected runtime for test data creation and one pure definitio
 The main value is inference.
 
 - reads table metadata and fills common required columns automatically
-- respects enums, varchar length, nullability, defaults, and generated columns
+- respects enums, varchar length, nullability, defaults, generated columns, and simple single-column `CHECK` constraints
 - can infer simple foreign-key parents without a hand-written factory for every table
+- can be extended for `customType(...)` columns through inference resolvers
 - lets you start from `createFactories({ db, schema })` and add explicit definitions only where your domain needs them
 
 That matters most when your schema is large enough that writing raw `insert(...)` values becomes the test itself.
@@ -38,19 +39,75 @@ Notes:
 
 - ESM-only package
 - requires Node `^20.19.0 || >=22.12.0`
-- tested against `drizzle-orm` `0.45.x`
+- `kiri-factory` and `kiri-factory/rqb-v1` are tested against `drizzle-orm` `0.45.x`
+- `kiri-factory/rqb-v2` is tested against `drizzle-orm` `1.0.0-beta.21`
 - the default `create()` adapter expects Drizzle's `returning()` support
 
-## Two Modes
+## Entrypoints and Relation Modes
 
-`kiri-factory` has two runtime modes.
+`kiri-factory` has three public entrypoints.
 
-1. Table-only runtime
-   You pass `tables` or a table-only `schema` object. You get property access, direct overrides, `createList()`, and simple FK auto-create.
-2. Relation-aware runtime
-   You pass the same `schema` object you use with Drizzle, including stable `relations(...)` exports. You also get typed `for(...)`, `hasOne(...)`, and `hasMany(...)` chain helpers.
+1. `kiri-factory`
+   The default entrypoint. Today this maps to the stable `relations(...)` world and table-only runtimes.
+2. `kiri-factory/rqb-v1`
+   An explicit stable pin. Use this if you want the stable path even after the default entrypoint changes in the future.
+3. `kiri-factory/rqb-v2`
+   The `defineRelations(...)` path for Drizzle Relational Queries v2.
+
+The user-facing choice is:
+
+- table-only or stable `relations(...)` schema: `kiri-factory`
+- explicit stable pin: `kiri-factory/rqb-v1`
+- `defineRelations(...)`: `kiri-factory/rqb-v2`
+
+## Repo Layout
+
+This repository uses one published npm package and a small internal workspace layout.
+
+- root `package.json`
+  publishes the public package `kiri-factory`
+- [`src`](C:/dev/kiri-factory/src)
+  publish wrapper for the default public entrypoint
+- [`packages/shared/src`](C:/dev/kiri-factory/packages/shared/src)
+  shared factory core used by both stable and RQB v2 entrypoints
+- [`packages/rqb-v1/src`](C:/dev/kiri-factory/packages/rqb-v1/src)
+  RQB v1 / stable entrypoint, relation extraction, bridge support, and typed runtime surface
+- [`packages/rqb-v2/src`](C:/dev/kiri-factory/packages/rqb-v2/src)
+  RQB v2-specific entrypoint, relation extraction, and typed runtime surface
+
+Important:
+
+- `packages/shared` is not a separately published npm package
+- `packages/rqb-v2` is not a separately published npm package either
+- users install only `kiri-factory`
+- users import `kiri-factory`, `kiri-factory/rqb-v1`, or `kiri-factory/rqb-v2`
 
 If your project already follows the usual Drizzle pattern of `import * as schema from "./schema"`, you can pass that same object to `createFactories({ db, schema })`.
+
+## Compatibility
+
+`kiri-factory` is intentionally broad, but not magical.
+
+| Category                                       | Status          | Notes                                                                                           |
+| ---------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------- |
+| PostgreSQL / MySQL / SQLite tables             | Supported       | Main target for runtime inference and relation planning                                         |
+| `pgSchema(...)` / `mysqlSchema(...)`           | Supported       | Runtime metadata is preserved; stable typed relation helpers still assume unique DB table names |
+| `sqliteTableCreator(...)`                      | Supported       | Prefixed table creators work normally                                                           |
+| Stable `relations(...)` exports                | Supported       | Enables typed `for(...)`, `hasOne(...)`, and `hasMany(...)`                                     |
+| `kiri-factory/rqb-v2` + `defineRelations(...)` | Supported       | Direct many-to-many and RQB v2 relation planning                                                |
+| Self relations / `relationName`                | Supported       | Use relation keys such as `"author"` or `"reports"`                                             |
+| Junction tables / composite primary keys       | Supported       | Preferred path for many-to-many in Drizzle                                                      |
+| Enums / JSON / JSONB / arrays                  | Supported       | Built-in inference handles these directly                                                       |
+| Simple single-column `CHECK` constraints       | Best effort     | Supports `>`, `>=`, `<`, `<=`, `BETWEEN`, and `IN (...)`                                        |
+| Generated columns / DB defaults                | Supported       | kiri-factory skips values the database should own                                               |
+| `customType(...)`                              | Resolver-driven | Add an inference resolver when the schema alone is not enough                                   |
+| Composite foreign keys                         | Partial         | Works when relation planning is explicit; generic auto-create stays conservative                |
+| Complex `CHECK` SQL                            | Manual override | Use `state(...)`, overrides, or an inference resolver                                           |
+
+The rule of thumb is:
+
+- if Drizzle exposes clear metadata, kiri-factory should infer it
+- if your schema encodes business rules in arbitrary SQL or custom driver mappers, add an adapter or explicit state
 
 ## Quick Start
 
@@ -69,8 +126,68 @@ const user = await factories.users.create();
 const post = await factories.posts.create();
 ```
 
-`createFactories(...)` is the main public API.  
+`createFactories(...)` is the main function exposed by each public entrypoint.  
 You set up the runtime once, then call `create()` directly on each table entry.
+
+### RQB v2 runtime
+
+If your project already uses `defineRelations(...)`, use the `rqb-v2` subpath.
+
+```ts
+import { defineRelations } from "drizzle-orm";
+import { createFactories } from "kiri-factory/rqb-v2";
+import * as schema from "./db/schema";
+
+const relations = defineRelations(schema, (r) => ({
+  users: {
+    groups: r.many.groups({
+      from: r.users.id.through(r.usersToGroups.userId),
+      to: r.groups.id.through(r.usersToGroups.groupId),
+    }),
+  },
+  groups: {
+    participants: r.many.users(),
+  },
+}));
+
+const factories = createFactories({
+  db,
+  relations,
+});
+```
+
+This path is where direct many-to-many planning lives:
+
+```ts
+await factories.users.hasMany("groups", 2).create();
+await factories.groups.hasMany("participants", 2).createGraph();
+```
+
+### Global inference controls
+
+Use `inference` on `createFactories(...)` when you want runtime-wide fallbacks for unusual columns.
+
+```ts
+const factories = createFactories({
+  db,
+  schema,
+  inference: {
+    customTypes: {
+      vector: ({ sequence }) => [sequence, sequence + 1, sequence + 2],
+    },
+  },
+});
+```
+
+Resolver lookup order is:
+
+- `columns["table.column"]`
+- `columns["column"]`
+- `customTypes["exact sql type"]`
+- `customTypes["normalized sql type"]`
+- `customTypes["Drizzle columnType"]`
+
+For example, a custom column with SQL type `vector(1536)` can be matched by either `vector(1536)` or `vector`.
 
 ### Relation-aware runtime
 
@@ -151,6 +268,22 @@ Definitions are pure.
 - `build()` works without a DB
 - `create()` belongs to the connected runtime returned by `createFactories(...)`
 
+### Local inference controls
+
+Use `inference` on `defineFactory(...)` when one table needs custom handling even without a connected runtime.
+
+```ts
+const embeddingFactory = defineFactory(embeddings, {
+  inference: {
+    columns: {
+      "embeddings.embedding": ({ sequence }) => [sequence * 10],
+    },
+  },
+});
+```
+
+Local inference wins over global runtime inference.
+
 ## Mixing Auto and Explicit Factories
 
 You do not need to define every table up front.
@@ -229,6 +362,39 @@ await factories.users.createList(3, (index) => ({
 ```
 
 The same pattern exists for pure definitions with `buildList(...)`.
+
+## Simple CHECK Support
+
+`kiri-factory` can best-effort parse simple single-column `CHECK` constraints and generate values that satisfy them.
+
+Examples that are intentionally supported:
+
+- `age > 21`
+- `score >= 1 AND score <= 5`
+- `score BETWEEN 1 AND 5`
+- `status IN ('draft', 'published')`
+
+This keeps common constraint-driven schemas usable without forcing you to hand-write every value.
+
+For more complex SQL, keep the factory explicit:
+
+```ts
+const reviewFactory = defineFactory(reviews, {
+  state: {
+    score: 5,
+  },
+});
+```
+
+If you need to disable `CHECK` parsing for one definition or one runtime:
+
+```ts
+const reviewFactory = defineFactory(reviews, {
+  inference: {
+    checks: false,
+  },
+});
+```
 
 ## Return Values
 
@@ -410,13 +576,50 @@ await factories.users.hasMany("posts", 2).create();
 
 #### many-to-many
 
-Supported through the junction table, which matches how stable Drizzle models many-to-many relations.
+There are two supported APIs, depending on which Drizzle relation system you use.
+
+Stable Drizzle: use the junction table directly.
 
 ```ts
 await factories.memberships.for("member").for("group").create();
 ```
 
-What is not in `v0.1` yet is a direct shortcut such as `users.attach("groups")`.
+This is still the best fit when the pivot row has its own payload columns and should stay explicit.
+
+If you want stable test code to use the same direct relation key as RQB v2, add a bridge once and keep the test call site simple.
+
+```ts
+import { createFactories, manyToMany } from "kiri-factory";
+
+const factories = createFactories({
+  db,
+  schema,
+  bridges: {
+    users: {
+      groups: manyToMany({
+        through: usersToGroups,
+        source: "user",
+        target: "group",
+      }),
+    },
+  },
+});
+
+await factories.users.hasMany("groups", 2).create();
+```
+
+RQB v2: use the direct relation itself.
+
+```ts
+import { createFactories } from "kiri-factory/rqb-v2";
+
+await factories.users.hasMany("groups", 2).create();
+await factories.groups.hasMany("participants", 2).createGraph();
+```
+
+In this mode, `kiri-factory` creates the related rows and the through row automatically.
+
+The current direct API is intentionally simple. If your through table has required payload columns, the explicit junction-table factory is still the clearest option.
 
 #### Multiple Relations To The Same Table
 
@@ -502,7 +705,7 @@ Precedence is:
 2. direct call-site overrides that do not conflict with planned relation-owned keys
 3. FK auto-create fallback for anything still missing
 
-Polymorphic relations and direct many-to-many shortcut builders are intentionally out of scope in `v0.1`.
+Polymorphic relations and automatic payload-aware through-table inference are intentionally out of scope in `v0.1`.
 
 ## Graph Behavior
 
@@ -527,14 +730,14 @@ Supported well in `v0.1`:
 - DB-default and generated columns by omission
 - common scalar types such as string, number, bigint, boolean, date, json, and arrays
 - relation metadata from stable Drizzle `relations(...)` exports when `schema` is provided
+- relation metadata from `defineRelations(...)` when using `kiri-factory/rqb-v2`
 
 Not promised in `v0.1`:
 
-- direct support for Drizzle v2 beta `defineRelations(...)`
-- direct many-to-many shortcut builders
 - polymorphic relation helpers
-- check-constraint-aware generation
+- complex check-constraint-aware generation
 - deep `drizzle-seed` integration
+- typed stable relation helpers across multiple schema-qualified tables that share the same DB table name
 
 ## Dialect Support
 
@@ -544,14 +747,14 @@ Tested in this repository:
 
 - PostgreSQL tables with PGlite, including nested graph returns
 - MySQL tables with a custom adapter for relation planning flows
-- SQLite tables with a custom adapter for has-one relation flows and graph returns
+- SQLite tables with a custom adapter for has-one relation flows, graph returns, and simple CHECK parsing
 
 Important distinction:
 
 - relation resolution and factory building are cross-dialect
 - persistence is adapter-specific
 
-The default adapter uses Drizzle `insert(...).values(...).returning()`, so drivers without `returning()` support should use a custom adapter.
+The default adapter uses Drizzle `insert(...).values(...).returning()`. For drivers without `returning()` support, supply a custom persistence adapter.
 
 ## Linting Definitions
 
@@ -568,7 +771,10 @@ This is useful for catching factories that still need explicit build-time overri
 
 By default, the runtime uses Drizzle's `returning()` support.
 
-If your driver needs a different persistence strategy, pass an adapter:
+If your driver needs a different persistence strategy, pass an adapter.
+
+For non-returning drivers, that usually means calling a driver-specific insert API and then reading the row back.  
+The example below keeps things simple and shows the adapter shape with a test-friendly echo implementation:
 
 ```ts
 const factories = createFactories({
@@ -576,8 +782,7 @@ const factories = createFactories({
   tables: { users },
   adapter: {
     async create({ db, table, values }) {
-      const [row] = await db.insert(table).values(values).returning();
-      return row;
+      return values as typeof values & { id: number };
     },
   },
 });

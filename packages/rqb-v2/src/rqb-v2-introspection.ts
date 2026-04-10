@@ -1,7 +1,9 @@
 import { getTableColumns, type Column, type Table } from "drizzle-orm";
-import { MySqlTable, getTableConfig as getMySqlTableConfig } from "drizzle-orm/mysql-core";
-import { PgTable, getTableConfig as getPgTableConfig } from "drizzle-orm/pg-core";
-import { SQLiteTable, getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
+import { getTableConfig as getGelTableConfig } from "drizzle-orm/gel-core";
+import { getTableConfig as getMySqlTableConfig } from "drizzle-orm/mysql-core";
+import { getTableConfig as getPgTableConfig } from "drizzle-orm/pg-core";
+import { getTableConfig as getSingleStoreTableConfig } from "drizzle-orm/singlestore-core";
+import { getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
 
 export function isTable(value: unknown): value is Table {
   return Boolean(
@@ -21,28 +23,16 @@ export function tableNameOf(table: Table) {
   return name;
 }
 
-export function getSingleColumnForeignKeys(table: Table) {
-  return getForeignKeys(table)
-    .filter(
-      (foreignKey) => foreignKey.localKeys.length === 1 && foreignKey.foreignKeys.length === 1,
-    )
-    .map((foreignKey) => ({
-      localKey: foreignKey.localKeys[0]!,
-      foreignKey: foreignKey.foreignKeys[0]!,
-      foreignTable: foreignKey.foreignTable,
-    }));
-}
-
 export function getForeignKeys(table: Table) {
   return getConfiguredForeignKeys(table)
     .map((foreignKey) => foreignKey.reference())
     .map((reference) => ({
       localKeys: reference.columns
-        .map((column) => columnKeyOf(table, column))
-        .filter((value): value is string => Boolean(value)),
+        .map((column: Column) => columnKeyOf(table, column))
+        .filter((value: string | undefined): value is string => Boolean(value)),
       foreignKeys: reference.foreignColumns
-        .map((column) => columnKeyOf(reference.foreignTable as Table, column))
-        .filter((value): value is string => Boolean(value)),
+        .map((column: Column) => columnKeyOf(reference.foreignTable as Table, column))
+        .filter((value: string | undefined): value is string => Boolean(value)),
       foreignTable: reference.foreignTable as Table,
       localColumnCount: reference.columns.length,
       foreignColumnCount: reference.foreignColumns.length,
@@ -85,36 +75,24 @@ export function getPrimaryKeyKeys(table: Table) {
   return [...keys];
 }
 
+export function columnKeyOf(table: Table, target: Column) {
+  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+    if (column === target) {
+      return columnKey;
+    }
+  }
+
+  return undefined;
+}
+
 function getConfiguredForeignKeys(table: Table) {
-  if (table instanceof PgTable) {
-    return getPgTableConfig(table).foreignKeys;
-  }
+  const foreignKeys = getTableConfigValue(table, "foreignKeys");
 
-  if (table instanceof MySqlTable) {
-    return getMySqlTableConfig(table).foreignKeys;
-  }
-
-  if (table instanceof SQLiteTable) {
-    return getSqliteTableConfig(table).foreignKeys;
-  }
-
-  return getInlineForeignKeys(table);
+  return foreignKeys.length > 0 ? foreignKeys : getInlineForeignKeys(table);
 }
 
 function getConfiguredPrimaryKeys(table: Table) {
-  if (table instanceof PgTable) {
-    return getPgTableConfig(table).primaryKeys;
-  }
-
-  if (table instanceof MySqlTable) {
-    return getMySqlTableConfig(table).primaryKeys;
-  }
-
-  if (table instanceof SQLiteTable) {
-    return getSqliteTableConfig(table).primaryKeys;
-  }
-
-  return [];
+  return getTableConfigValue(table, "primaryKeys");
 }
 
 function getInlineForeignKeys(table: Table) {
@@ -139,16 +117,6 @@ function getInlineForeignKeys(table: Table) {
   }>;
 }
 
-export function columnKeyOf(table: Table, target: Column) {
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
-    if (column === target) {
-      return columnKey;
-    }
-  }
-
-  return undefined;
-}
-
 function getDrizzleSymbol(table: Table, hint: string) {
   return Object.getOwnPropertySymbols(table).find((value) => String(value).includes(hint));
 }
@@ -161,4 +129,29 @@ function getDrizzleSymbolValue(table: Table, hint: string) {
   }
 
   return (table as unknown as Record<symbol, unknown>)[symbol];
+}
+
+function getTableConfigValue(table: Table, key: "foreignKeys" | "primaryKeys") {
+  const getters: Array<(table: unknown) => Partial<Record<typeof key, unknown>>> = [
+    getPgTableConfig as (table: unknown) => Partial<Record<typeof key, unknown>>,
+    getGelTableConfig as (table: unknown) => Partial<Record<typeof key, unknown>>,
+    getMySqlTableConfig as (table: unknown) => Partial<Record<typeof key, unknown>>,
+    getSqliteTableConfig as (table: unknown) => Partial<Record<typeof key, unknown>>,
+    getSingleStoreTableConfig as (table: unknown) => Partial<Record<typeof key, unknown>>,
+  ];
+
+  for (const getter of getters) {
+    try {
+      const config = getter(table);
+      const value = config[key];
+
+      if (Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
 }

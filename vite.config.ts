@@ -1,17 +1,25 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  run: {
+    tasks: {
+      "build:workspace": {
+        command: "vp run build:pkg && vp run build:rqb-v1 && vp run build:rqb-v2",
+      },
+      "check:workspace": {
+        command: "vp run check:pkg && vp run check:rqb-v1 && vp run check:rqb-v2",
+      },
+      "test:workspace": {
+        cache: false,
+        command: "vp run test:rqb-v1 && vp run test:rqb-v2",
+      },
+    },
+  },
   lint: {
-    ignorePatterns: ["dist/**"],
+    ignorePatterns: ["dist/**", ".tmp/**", "packages/**"],
     options: {
       typeAware: true,
       typeCheck: true,
-    },
-  },
-  test: {
-    include: ["test/**/*.test.ts"],
-    coverage: {
-      reporter: ["text", "html"],
     },
   },
   pack: {

@@ -1,12 +1,35 @@
 import { PGlite } from "@electric-sql/pglite";
-import { eq, relations, type InferSelectModel, type Table } from "drizzle-orm";
+import {
+  eq,
+  getTableColumns,
+  relations,
+  sql,
+  type InferSelectModel,
+  type Table,
+} from "drizzle-orm";
 import { mysqlTable, varchar as mysqlVarchar } from "drizzle-orm/mysql-core";
-import { pgEnum, pgTable, serial, text, timestamp, integer, varchar } from "drizzle-orm/pg-core";
+import {
+  check,
+  customType,
+  pgEnum,
+  pgTable,
+  real,
+  serial,
+  text,
+  timestamp,
+  integer,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { sqliteTable, text as sqliteText } from "drizzle-orm/sqlite-core";
+import {
+  check as sqliteCheck,
+  integer as sqliteInteger,
+  sqliteTable,
+  text as sqliteText,
+} from "drizzle-orm/sqlite-core";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { createFactories, defineFactory, existing } from "../src";
+import { createFactories, defineFactory, existing, manyToMany } from "../src";
 
 const userRole = pgEnum("user_role", ["member", "admin"]);
 
@@ -213,6 +236,61 @@ const relationCommentsRelations = relations(relationComments, ({ one }) => ({
   }),
 }));
 
+const constrainedArticles = pgTable(
+  "constrained_articles",
+  {
+    id: serial("id").primaryKey(),
+    rating: integer("rating").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [
+    check("constrained_articles_rating_check", sql`${table.rating} >= 3 AND ${table.rating} <= 5`),
+    check("constrained_articles_status_check", sql`${table.status} IN ('draft', 'published')`),
+  ],
+);
+
+const vector = customType<{ data: number[] }>({
+  dataType() {
+    return "vector(3)";
+  },
+});
+
+const embeddings = pgTable("embeddings", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull(),
+  embedding: vector("embedding").notNull(),
+});
+
+const floatingReadings = pgTable(
+  "floating_readings",
+  {
+    id: serial("id").primaryKey(),
+    score: real("score").notNull(),
+  },
+  (table) => [
+    check("floating_readings_score_check", sql`${table.score} > 0.1 AND ${table.score} < 0.2`),
+  ],
+);
+
+const sqliteConstrainedNotes = sqliteTable(
+  "sqlite_constrained_notes",
+  {
+    id: sqliteText("id").primaryKey(),
+    rating: sqliteInteger("rating").notNull(),
+    status: sqliteText("status").notNull(),
+  },
+  (table) => [
+    sqliteCheck(
+      "sqlite_constrained_notes_rating_check",
+      sql`${table.rating} >= 1 AND ${table.rating} < 3`,
+    ),
+    sqliteCheck(
+      "sqlite_constrained_notes_status_check",
+      sql`${table.status} IN ('draft', 'published')`,
+    ),
+  ],
+);
+
 const clients: PGlite[] = [];
 
 afterEach(async () => {
@@ -277,6 +355,56 @@ describe("kiri-factory", () => {
     expect(seen).toEqual(["root-1@kiri.dev"]);
   });
 
+  it("supports customType inference through global and per-definition adapters", async () => {
+    const built = await defineFactory(embeddings, {
+      inference: {
+        columns: {
+          "embeddings.embedding": ({ sequence }) => [sequence * 10],
+        },
+      },
+    }).build({
+      label: "Built embedding",
+    });
+    const factories = createFactories({
+      db: {},
+      tables: { embeddings },
+      adapter: echoAdapter([]),
+      inference: {
+        customTypes: {
+          vector: ({ sequence }: { sequence: number }) => [sequence, sequence + 1, sequence + 2],
+        },
+      },
+    });
+    const runtimeRow = await factories.embeddings.create({
+      label: "Runtime embedding",
+    });
+    const overriddenRow = await createFactories({
+      db: {},
+      tables: { embeddings },
+      adapter: echoAdapter([]),
+      definitions: {
+        embeddings: defineFactory(embeddings, {
+          inference: {
+            columns: {
+              "embeddings.embedding": ({ sequence }) => [sequence * 100],
+            },
+          },
+        }),
+      },
+      inference: {
+        customTypes: {
+          vector: () => [-1, -1, -1],
+        },
+      },
+    }).embeddings.create({
+      label: "Definition wins",
+    });
+
+    expect(built.embedding).toEqual([10]);
+    expect(runtimeRow.embedding).toEqual([1, 2, 3]);
+    expect(overriddenRow.embedding).toEqual([100]);
+  });
+
   it("creates rows through the connected runtime without extra setup calls", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
@@ -295,6 +423,50 @@ describe("kiri-factory", () => {
       nickname: "ada",
       role: "member",
     });
+  });
+
+  it("uses simple CHECK constraints to infer compliant values", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      tables: { constrainedArticles },
+    });
+    const article = await factories.constrainedArticles.create();
+
+    expect(article.rating).toBeGreaterThanOrEqual(3);
+    expect(article.rating).toBeLessThanOrEqual(5);
+    expect(["draft", "published"]).toContain(article.status);
+  });
+
+  it("lets local inference disable simple CHECK parsing for pure definitions", async () => {
+    const built = await defineFactory(constrainedArticles, {
+      inference: {
+        checks: false,
+      },
+    }).build();
+
+    expect(built.rating).toBe(1);
+    expect(built.status).toBe("constrained_articles-status-1");
+  });
+
+  it("supports mixed exclusive numeric bounds in simple CHECK parsing", async () => {
+    const row = await defineFactory(floatingReadings).build();
+
+    expect(row.score).toBeGreaterThan(0.1);
+    expect(row.score).toBeLessThan(0.2);
+  });
+
+  it("parses simple CHECK constraints from SQLite schemas too", async () => {
+    const factories = createFactories({
+      db: {},
+      tables: { sqliteConstrainedNotes },
+      adapter: echoAdapter([]),
+    });
+    const note = await factories.sqliteConstrainedNotes.create();
+
+    expect(note.rating).toBeGreaterThanOrEqual(1);
+    expect(note.rating).toBeLessThan(3);
+    expect(["draft", "published"]).toContain(note.status);
   });
 
   it("accepts explicit definitions and uses them during relation auto-create", async () => {
@@ -537,7 +709,7 @@ describe("kiri-factory", () => {
         groupsRelations,
         membershipsRelations,
       },
-      adapter: echoAdapter(log),
+      adapter: echoAdapterWithGeneratedIds(log),
     });
 
     const membership = await factories.memberships
@@ -548,6 +720,117 @@ describe("kiri-factory", () => {
     expect(log.map((entry) => entry.table)).toEqual(["members", "groups", "memberships"]);
     expect(membership.memberId).toBe(log[0]?.values.id);
     expect(membership.groupId).toBe(log[1]?.values.id);
+  });
+
+  it("supports stable many-to-many bridges with direct relation keys", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: {
+        members,
+        groups,
+        memberships,
+        membersRelations,
+        groupsRelations,
+        membershipsRelations,
+      },
+      bridges: {
+        members: {
+          groups: manyToMany({
+            through: memberships,
+            source: "member",
+            target: "group",
+          }),
+        },
+        groups: {
+          participants: manyToMany({
+            through: memberships,
+            source: "group",
+            target: "member",
+          }),
+        },
+      },
+    });
+
+    const memberGraph = await factories.members.hasMany("groups", 2).createGraph({
+      name: "Bridge Member",
+    });
+    const groupGraph = await factories.groups.hasMany("participants", 1).createGraph({
+      label: "Bridge Group",
+    });
+    const memberMemberships = await db
+      .select()
+      .from(memberships)
+      .where(eq(memberships.memberId, memberGraph.row.id));
+    const groupMemberships = await db
+      .select()
+      .from(memberships)
+      .where(eq(memberships.groupId, groupGraph.row.id));
+
+    expect(memberGraph.relations.groups).toHaveLength(2);
+    expect(groupGraph.relations.participants).toHaveLength(1);
+    expect(memberMemberships).toHaveLength(2);
+    expect(groupMemberships).toHaveLength(1);
+  });
+
+  it("supports stable many-to-many bridge graph lists without duplicating through rows", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: {
+        members,
+        groups,
+        memberships,
+        membersRelations,
+        groupsRelations,
+        membershipsRelations,
+      },
+      bridges: {
+        members: {
+          groups: manyToMany({
+            through: memberships,
+            source: "member",
+            target: "group",
+          }),
+        },
+      },
+    });
+
+    const graphs = await factories.members.hasMany("groups", 2).createGraphList(2, (index) => ({
+      name: `Bridge Member ${index + 1}`,
+    }));
+    const persistedMemberships = await db.select().from(memberships);
+
+    expect(graphs).toHaveLength(2);
+    expect(graphs[0]?.relations.groups).toHaveLength(2);
+    expect(graphs[1]?.relations.groups).toHaveLength(2);
+    expect(persistedMemberships).toHaveLength(4);
+  });
+
+  it("rejects invalid stable bridge definitions eagerly", () => {
+    expect(() =>
+      createFactories({
+        db: {},
+        schema: {
+          members,
+          groups,
+          memberships,
+          membersRelations,
+          groupsRelations,
+          membershipsRelations,
+        },
+        bridges: {
+          members: {
+            groups: manyToMany({
+              through: memberships,
+              source: "missing",
+              target: "group",
+            }),
+          },
+        },
+        adapter: echoAdapter([]),
+      }),
+    ).toThrow('could not find relation "missing"');
   });
 
   it("supports relation planning for MySQL schemas with a custom adapter", async () => {
@@ -610,6 +893,29 @@ describe("kiri-factory", () => {
     expect(graph.source).toBe("created");
     expect(graph.relations.profile?.row.userId).toBe(graph.row.id);
     expect(graph.relations.profile?.source).toBe("created");
+  });
+
+  it("rejects reciprocal parent plans inside prepared child factories", async () => {
+    const log: Array<{ table: string; values: Record<string, unknown> }> = [];
+    const factories = createFactories({
+      db: {},
+      schema: { sqliteUsers, sqliteProfiles, sqliteUsersRelations, sqliteProfilesRelations },
+      adapter: echoAdapter(log),
+    });
+
+    await expect(
+      factories.sqliteUsers
+        .hasOne(
+          "profile",
+          factories.sqliteProfiles.for("user", {
+            displayName: "shadow",
+          }),
+        )
+        .create({
+          displayName: "owner",
+        }),
+    ).rejects.toThrow('Remove the reciprocal for("user")');
+    expect(log.map((entry) => entry.table)).toEqual(["sqlite_users"]);
   });
 
   it("reuses an existing parent row with existing(...)", async () => {
@@ -687,6 +993,43 @@ describe("kiri-factory", () => {
     expect(reviewerRelation?.row.name).toBe("Lin");
     expect(graph.row.authorId).toBe(log[0]?.values.id);
     expect(graph.row.reviewerId).toBe(log[1]?.values.id);
+  });
+
+  it("supports mixing existing and created rows across same-target relation keys", async () => {
+    const log: Array<{ table: string; values: Record<string, unknown> }> = [];
+    const factories = createFactories({
+      db: {},
+      schema: {
+        relationUsers,
+        relationComments,
+        relationUsersRelations,
+        relationCommentsRelations,
+      },
+      adapter: echoAdapterWithGeneratedIds(log),
+    });
+
+    const author = await factories.relationUsers.create({
+      name: "Existing Ada",
+    });
+    const graph = await factories.relationComments
+      .for("author", existing(relationUsers, author))
+      .for("reviewer", {
+        name: "Created Lin",
+      })
+      .createGraph({
+        body: "Mixed same-target relation",
+      });
+
+    expect(graph.relations.author?.source).toBe("existing");
+    expect(graph.relations.author?.row.id).toBe(author.id);
+    expect(graph.relations.reviewer?.source).toBe("created");
+    expect(graph.row.authorId).toBe(author.id);
+    expect(graph.row.reviewerId).not.toBe(author.id);
+    expect(log.map((entry) => entry.table)).toEqual([
+      "relation_users",
+      "relation_users",
+      "relation_comments",
+    ]);
   });
 
   it("supports nested relation planning by passing a prepared related factory", async () => {
@@ -917,6 +1260,30 @@ async function createTestDb() {
       token varchar(16) not null,
       expires_at timestamptz not null
     );
+
+    create table constrained_articles (
+      id serial primary key,
+      rating integer not null,
+      status text not null,
+      constraint constrained_articles_rating_check check (rating >= 3 and rating <= 5),
+      constraint constrained_articles_status_check check (status in ('draft', 'published'))
+    );
+
+    create table members (
+      id serial primary key,
+      name text not null
+    );
+
+    create table groups (
+      id serial primary key,
+      label text not null
+    );
+
+    create table memberships (
+      id serial primary key,
+      member_id integer not null references members(id),
+      group_id integer not null references groups(id)
+    );
   `);
 
   const db = drizzle(client);
@@ -934,6 +1301,39 @@ function echoAdapter(log: Array<{ table: string; values: Record<string, unknown>
       values: Record<string, unknown>;
     }) {
       const row = { ...values } as InferSelectModel<TTable> & Record<string, unknown>;
+
+      log.push({
+        table: tableName(table),
+        values: row,
+      });
+
+      return row as InferSelectModel<TTable>;
+    },
+  };
+}
+
+function echoAdapterWithGeneratedIds(
+  log: Array<{ table: string; values: Record<string, unknown> }>,
+) {
+  const nextIdByTable = new Map<string, number>();
+
+  return {
+    async create<TTable extends Table>({
+      table,
+      values,
+    }: {
+      table: TTable;
+      values: Record<string, unknown>;
+    }) {
+      const row = { ...values } as InferSelectModel<TTable> & Record<string, unknown>;
+      const tableColumns = getTableColumns(table) as Record<string, unknown>;
+
+      if ("id" in tableColumns && row.id === undefined) {
+        const tableKey = tableName(table);
+        const nextId = (nextIdByTable.get(tableKey) ?? 0) + 1;
+        nextIdByTable.set(tableKey, nextId);
+        (row as Record<string, unknown>).id = nextId;
+      }
 
       log.push({
         table: tableName(table),

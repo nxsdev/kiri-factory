@@ -1,7 +1,7 @@
 {
   "name": "kiri-factory",
   "version": "0.1.0",
-  "description": "Connected runtime factories for Drizzle ORM",
+  "description": "Schema-driven Drizzle factories for real database tests and complex relation graphs",
   "keywords": [
     "drizzle",
     "drizzle-orm",
@@ -9,14 +9,14 @@
     "pglite",
     "testing"
   ],
-  "homepage": "https://github.com/kiri-factory/kiri-factory",
+  "homepage": "https://github.com/nxsdev/kiri-factory",
   "bugs": {
-    "url": "https://github.com/kiri-factory/kiri-factory/issues"
+    "url": "https://github.com/nxsdev/kiri-factory/issues"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kiri-factory/kiri-factory.git"
+    "url": "git+https://github.com/nxsdev/kiri-factory.git"
   },
   "files": [
     "dist",

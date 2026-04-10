@@ -1,8 +1,15 @@
 # kiri-factory
 
-Schema-driven factories for Drizzle ORM.
+Schema-driven factories for Drizzle ORM, built for real database tests and complex relation graphs.
 
-`kiri-factory` gives you one connected runtime for test data creation and one pure definition layer for shared factory logic.
+`kiri-factory` is aimed at the point where direct `db.insert(...)` calls and ad-hoc test helpers start to break down:
+
+- large tables with many required columns
+- relation-heavy schemas
+- real database test suites that need readable setup code
+- projects that want one factory layer instead of many one-off helpers
+
+It gives you one connected runtime for test data creation and one pure definition layer for shared factory logic.
 
 - main entrypoint: `createFactories({ db, tables | schema, definitions? })`
 - shared declarations: `defineFactory(table, options?)`
@@ -10,7 +17,7 @@ Schema-driven factories for Drizzle ORM.
 - relation-aware runtime: `factories.posts.for("author").create()`
 
 For bulk fake data across many rows, `drizzle-seed` is still the better fit.  
-For focused test records, overrides, and small relation graphs, `kiri-factory` is the better fit.
+For focused test records, overrides, reusable setup, and relation-aware graphs, `kiri-factory` is the better fit.
 
 ## Install
 

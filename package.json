@@ -60,6 +60,7 @@
     "check:rqb-v1": "vp run @kiri-factory/rqb-v1-internal#check",
     "check:rqb-v2": "vp run @kiri-factory/rqb-v2-internal#check",
     "prepublishOnly": "pnpm check && pnpm test && pnpm build",
+    "setup:hooks": "pnpm exec vp config",
     "test": "vp run test:workspace",
     "test:rqb-v1": "vp run @kiri-factory/rqb-v1-internal#test",
     "test:rqb-v2": "vp run @kiri-factory/rqb-v2-internal#test",

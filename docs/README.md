@@ -17,6 +17,7 @@ That makes them easier to:
 - [Inference and `CHECK` support](./inference.md)
 - [Adapters, dialects, and runtime behavior](./adapters.md)
 - [Compatibility and limits](./compatibility.md)
+- [Recipes](./recipes/README.md)
 
 ## Suggested Reading Order
 
@@ -37,3 +38,4 @@ If you are using Drizzle RQB v2 already, read [Getting started](./getting-starte
 - you want to understand what is inferred: [Inference and `CHECK` support](./inference.md)
 - you need a custom adapter or care about runtime write behavior: [Adapters, dialects, and runtime behavior](./adapters.md)
 - you want the support boundaries first: [Compatibility and limits](./compatibility.md)
+- you want concrete real-world examples: [Recipes](./recipes/README.md)

@@ -104,13 +104,18 @@ The docs are split into small Markdown files on purpose so humans, Codex, and Cl
 - [Inference and `CHECK` support](./docs/inference.md)
 - [Adapters, dialects, and runtime behavior](./docs/adapters.md)
 - [Compatibility and limits](./docs/compatibility.md)
+- [Recipes](./docs/recipes/README.md)
 
 ## Development
 
 This repository uses `pnpm` workspaces, catalogs, and `Vite+`.
 
 ```bash
+pnpm setup:hooks
 pnpm check
 pnpm test
 pnpm build
 ```
+
+`pnpm setup:hooks` installs the repo-local Vite+ Git hooks and points `core.hooksPath` at `.vite-hooks/_`.
+The pre-commit hook runs `vp staged`, which in turn applies `vp check --fix` to staged files.

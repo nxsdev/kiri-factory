@@ -46,9 +46,6 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.4.4
-      '@kiri-factory/shared-internal':
-        specifier: workspace:*
-        version: link:../shared
       drizzle-orm:
         specifier: catalog:rqb-v1
         version: 0.45.2(@electric-sql/pglite@0.4.4)
@@ -64,9 +61,6 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.4.4
-      '@kiri-factory/shared-internal':
-        specifier: workspace:*
-        version: link:../shared
       drizzle-orm:
         specifier: catalog:rqb-v2
         version: 1.0.0-beta.21(@electric-sql/pglite@0.4.4)(@types/mssql@9.1.11(@azure/core-client@1.10.1))(mssql@11.0.1(@azure/core-client@1.10.1))

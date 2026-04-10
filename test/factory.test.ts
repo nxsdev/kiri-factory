@@ -1,0 +1,877 @@
+import { PGlite } from "@electric-sql/pglite";
+import {
+  check,
+  customType,
+  foreignKey,
+  integer,
+  pgEnum,
+  pgTable,
+  point,
+  primaryKey,
+  serial,
+  text,
+  unique,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/pglite";
+import { seed } from "drizzle-seed";
+import { eq, relations, sql } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import { createFactories, defineFactory } from "../src";
+
+const userRole = pgEnum("user_role", ["member", "admin"]);
+const vector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "vector";
+  },
+});
+const pointValue = customType<{ data: { x: number; y: number }; driverData: string }>({
+  dataType() {
+    return "point";
+  },
+  toDriver(value) {
+    return `(${value.x},${value.y})`;
+  },
+});
+
+const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  nickname: varchar("nickname", { length: 24 }).notNull(),
+  role: userRole("role").notNull(),
+});
+
+const posts = pgTable("posts", {
+  id: serial("id").primaryKey(),
+  authorId: integer("author_id")
+    .notNull()
+    .references(() => users.id),
+  title: varchar("title", { length: 48 }).notNull(),
+});
+
+const sessions = pgTable("sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  token: varchar("token", { length: 24 }).notNull(),
+});
+
+const reviewComments = pgTable("review_comments", {
+  id: serial("id").primaryKey(),
+  authorId: integer("author_id")
+    .notNull()
+    .references(() => users.id),
+  reviewerId: integer("reviewer_id")
+    .notNull()
+    .references(() => users.id),
+  body: text("body").notNull(),
+});
+
+const employees = pgTable("employees", {
+  id: serial("id").primaryKey(),
+  managerId: integer("manager_id"),
+  name: text("name").notNull(),
+});
+
+const members = pgTable("members", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+});
+
+const groups = pgTable("groups", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull(),
+});
+
+const memberships = pgTable("memberships", {
+  id: serial("id").primaryKey(),
+  memberId: integer("member_id")
+    .notNull()
+    .references(() => members.id),
+  groupId: integer("group_id")
+    .notNull()
+    .references(() => groups.id),
+  role: text("role").notNull(),
+});
+
+const orderVersions = pgTable(
+  "order_versions",
+  {
+    orderId: integer("order_id").notNull(),
+    version: integer("version").notNull(),
+    note: text("note").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.orderId, table.version],
+    }),
+  ],
+);
+
+const orderVersionLines = pgTable(
+  "order_version_lines",
+  {
+    orderId: integer("order_id").notNull(),
+    version: integer("version").notNull(),
+    sku: varchar("sku", { length: 24 }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.orderId, table.version],
+      foreignColumns: [orderVersions.orderId, orderVersions.version],
+    }),
+  ],
+);
+
+const constrainedArticles = pgTable(
+  "constrained_articles",
+  {
+    id: serial("id").primaryKey(),
+    rating: integer("rating").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [
+    check("constrained_articles_rating_check", sql`${table.rating} between 3 and 5`),
+    check("constrained_articles_status_check", sql`${table.status} in ('draft', 'published')`),
+  ],
+);
+
+const pairedScores = pgTable(
+  "paired_scores",
+  {
+    id: serial("id").primaryKey(),
+    minScore: integer("min_score").notNull(),
+    maxScore: integer("max_score").notNull(),
+  },
+  (table) => [check("paired_scores_ordered_check", sql`${table.minScore} < ${table.maxScore}`)],
+);
+
+const vectorNotes = pgTable("vector_notes", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  embedding: vector("embedding").notNull(),
+});
+
+const spatialNotes = pgTable("spatial_notes", {
+  id: serial("id").primaryKey(),
+  externalId: uuid("external_id").notNull(),
+  tuplePoint: point("tuple_point").notNull(),
+  objectPoint: point("object_point", { mode: "xy" }).notNull(),
+});
+
+const customPointNotes = pgTable("custom_point_notes", {
+  id: serial("id").primaryKey(),
+  location: pointValue("location").notNull(),
+});
+
+const seededCustomers = pgTable("seeded_customers", {
+  id: serial("id").primaryKey(),
+  companyName: text("company_name").notNull(),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email").notNull().unique(),
+});
+
+const scopedArticles = pgTable(
+  "scoped_articles",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id").notNull(),
+    slug: varchar("slug", { length: 48 }).notNull(),
+  },
+  (table) => [unique("scoped_articles_tenant_slug_unique").on(table.tenantId, table.slug)],
+);
+
+const partialEmailSubscribers = pgTable(
+  "partial_email_subscribers",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email").notNull(),
+  },
+  (table) => [
+    uniqueIndex("partial_email_subscribers_email_present_unique")
+      .on(table.email)
+      .where(sql`${table.email} <> ''`),
+  ],
+);
+
+const caseInsensitiveSlugs = pgTable(
+  "case_insensitive_slugs",
+  {
+    id: serial("id").primaryKey(),
+    slug: text("slug").notNull(),
+  },
+  (table) => [
+    uniqueIndex("case_insensitive_slugs_lower_slug_unique").on(sql`lower(${table.slug})`),
+  ],
+);
+
+const usersRelations = relations(users, ({ many }) => ({
+  posts: many(posts),
+  sessions: many(sessions),
+}));
+
+const postsRelations = relations(posts, ({ one }) => ({
+  author: one(users, {
+    fields: [posts.authorId],
+    references: [users.id],
+  }),
+}));
+
+const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
+}));
+
+const reviewCommentsRelations = relations(reviewComments, ({ one }) => ({
+  author: one(users, {
+    fields: [reviewComments.authorId],
+    references: [users.id],
+  }),
+  reviewer: one(users, {
+    fields: [reviewComments.reviewerId],
+    references: [users.id],
+  }),
+}));
+
+const employeesRelations = relations(employees, ({ one, many }) => ({
+  manager: one(employees, {
+    relationName: "management",
+    fields: [employees.managerId],
+    references: [employees.id],
+  }),
+  reports: many(employees, {
+    relationName: "management",
+  }),
+}));
+
+const membershipsRelations = relations(memberships, ({ one }) => ({
+  member: one(members, {
+    fields: [memberships.memberId],
+    references: [members.id],
+  }),
+  group: one(groups, {
+    fields: [memberships.groupId],
+    references: [groups.id],
+  }),
+}));
+
+const orderVersionLinesRelations = relations(orderVersionLines, ({ one }) => ({
+  orderVersion: one(orderVersions, {
+    fields: [orderVersionLines.orderId, orderVersionLines.version],
+    references: [orderVersions.orderId, orderVersions.version],
+  }),
+}));
+
+const schema = {
+  constrainedArticles,
+  employees,
+  employeesRelations,
+  groups,
+  memberships,
+  membershipsRelations,
+  members,
+  orderVersionLines,
+  orderVersionLinesRelations,
+  orderVersions,
+  pairedScores,
+  posts,
+  postsRelations,
+  reviewComments,
+  reviewCommentsRelations,
+  seededCustomers,
+  sessions,
+  sessionsRelations,
+  userRole,
+  users,
+  usersRelations,
+};
+
+const clients: PGlite[] = [];
+
+afterEach(async () => {
+  await Promise.all(clients.splice(0).map((client) => client.close()));
+});
+
+describe("kiri-factory stable runtime", () => {
+  it("builds and creates many rows with inference, traits, and overrides", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema,
+      definitions: {
+        users: defineFactory(users, {
+          defaults: {
+            role: "member",
+          },
+          traits: {
+            admin: {
+              role: "admin",
+            },
+          },
+        }),
+      },
+    });
+
+    const built = await factories.users.withTraits("admin").buildMany(2, (index) => ({
+      email: `built-${index + 1}@example.com`,
+    }));
+    const created = await factories.users.createMany(2, (index) => ({
+      email: `created-${index + 1}@example.com`,
+      nickname: `created-${index + 1}`,
+    }));
+
+    expect(built).toHaveLength(2);
+    expect(built[0]?.role).toBe("admin");
+    expect(created).toHaveLength(2);
+    expect(created[0]?.id).toBeTypeOf("number");
+    expect(created[1]?.email).toBe("created-2@example.com");
+  });
+
+  it("requires explicit parents instead of auto-creating missing foreign keys", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { posts, users },
+    });
+
+    await expect(
+      factories.posts.create({
+        title: "Explicit author required",
+      }),
+    ).rejects.toThrow(/Required foreign keys are not auto-created by plain create\(\)/);
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("verifies create-time issues across the runtime", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { posts, users },
+    });
+
+    const issues = await factories.verifyCreates();
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.key).toBe("posts");
+    expect(issues[0]?.error.message).toMatch(/Required foreign keys are not auto-created/);
+  });
+
+  it("creates belongs-to parents through for(...)", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const author = await factories.users.create({
+      email: "author@example.com",
+      nickname: "author",
+      role: "admin",
+    });
+
+    const post = await factories.posts.for("author", author).create({
+      title: "Planned post",
+    });
+
+    const [persistedAuthor] = await db.select().from(users).where(eq(users.id, post.authorId));
+    expect(persistedAuthor?.email).toBe("author@example.com");
+    expect(post.title).toBe("Planned post");
+  });
+
+  it("reuses existing parents through for(..., row)", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const author = await factories.users.create({
+      email: "existing@example.com",
+      nickname: "existing",
+      role: "member",
+    });
+
+    const post = await factories.posts.for("author", author).create({
+      title: "Existing author",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(post.authorId).toBe(author.id);
+    expect(persistedUsers).toHaveLength(1);
+  });
+
+  it("supports same-target relation keys", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const author = await factories.users.create({
+      email: "author@example.com",
+      nickname: "author",
+      role: "member",
+    });
+    const reviewer = await factories.users.create({
+      email: "reviewer@example.com",
+      nickname: "reviewer",
+      role: "admin",
+    });
+
+    const comment = await factories.reviewComments
+      .for("author", author)
+      .for("reviewer", reviewer)
+      .create({
+        body: "Looks good",
+      });
+
+    expect(comment.authorId).not.toBe(comment.reviewerId);
+  });
+
+  it("supports self relations through for(...)", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const manager = await factories.employees.create({
+      name: "Boss",
+    });
+
+    const employee = await factories.employees.for("manager", manager).create({
+      name: "Worker",
+    });
+
+    const [persistedManager] = await db
+      .select()
+      .from(employees)
+      .where(eq(employees.id, employee.managerId!));
+    expect(persistedManager?.name).toBe("Boss");
+  });
+
+  it("models many-to-many explicitly through the junction table", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const member = await factories.members.create({ name: "Ada" });
+    const group = await factories.groups.create({ label: "Core" });
+
+    const membership = await factories.memberships
+      .for("member", member)
+      .for("group", group)
+      .create({
+        role: "owner",
+      });
+
+    const [persistedMember] = await db
+      .select()
+      .from(members)
+      .where(eq(members.id, membership.memberId));
+    const [persistedGroup] = await db
+      .select()
+      .from(groups)
+      .where(eq(groups.id, membership.groupId));
+
+    expect(persistedMember?.name).toBe("Ada");
+    expect(persistedGroup?.label).toBe("Core");
+    expect(membership.role).toBe("owner");
+  });
+
+  it("copies composite foreign keys through for(...)", async () => {
+    const log: Array<{ table: string; values: Record<string, unknown> }> = [];
+    const factories = createFactories({
+      db: {} as object,
+      schema,
+      adapter: echoAdapterWithGeneratedIds(log),
+    });
+    const version = await factories.orderVersions.create({
+      note: "v1",
+    });
+
+    const line = await factories.orderVersionLines.for("orderVersion", version).create({
+      sku: "sku-1",
+    });
+
+    expect(line.orderId).toBeTypeOf("number");
+    expect(line.version).toBeTypeOf("number");
+    expect(log.some((entry) => entry.table === "order_versions")).toBe(true);
+  });
+
+  it("supports customType inference resolvers", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { vectorNotes },
+      adapter: echoAdapterWithGeneratedIds([]),
+      inference: {
+        customTypes: {
+          vector: () => "[0,0,0]",
+        },
+      },
+    });
+
+    const note = await factories.vectorNotes.build({
+      title: "Embedding note",
+    });
+
+    expect(note.embedding).toBe("[0,0,0]");
+  });
+
+  it("infers uuid and point columns without explicit state", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { spatialNotes },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    const note = await factories.spatialNotes.build();
+
+    expect(note.externalId).toBe("00000000-0000-4000-8000-000000000001");
+    expect(note.tuplePoint).toEqual([1, 2]);
+    expect(note.objectPoint).toEqual({ x: 1, y: 2 });
+  });
+
+  it("supports point-like custom types through customTypes resolvers", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { customPointNotes },
+      adapter: echoAdapterWithGeneratedIds([]),
+      inference: {
+        customTypes: {
+          point: ({ sequence }) => ({ x: sequence, y: sequence + 1 }),
+        },
+      },
+    });
+
+    const note = await factories.customPointNotes.build();
+
+    expect(note.location).toEqual({ x: 1, y: 2 });
+  });
+
+  it("respects simple single-column CHECK constraints during inference", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { constrainedArticles },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    const article = await factories.constrainedArticles.build();
+
+    expect(article.rating).toBeGreaterThanOrEqual(3);
+    expect(article.rating).toBeLessThanOrEqual(5);
+    expect(["draft", "published"]).toContain(article.status);
+  });
+
+  it("lets complex CHECK constraints fail at insert time", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { pairedScores },
+    });
+
+    await expect(factories.pairedScores.create()).rejects.toThrow();
+  });
+
+  it("evaluates shared drizzle-seed columns(f) during runtime createMany()", async () => {
+    const { db } = await createTestDb();
+    const customerFactory = defineFactory(seededCustomers, {
+      columns: (f) => ({
+        companyName: f.companyName(),
+        contactName: f.fullName(),
+        contactEmail: f.email(),
+      }),
+    });
+    const factories = createFactories({
+      db,
+      schema: { seededCustomers },
+      definitions: {
+        seededCustomers: customerFactory,
+      },
+    });
+
+    const customers = await factories.seededCustomers.createMany(3);
+
+    expect(customers).toHaveLength(3);
+    expect(customers[0]?.companyName).toBeTypeOf("string");
+    expect(customers[0]?.contactName).toBeTypeOf("string");
+    expect(customers[0]?.contactEmail).toContain("@");
+    expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
+  });
+
+  it("reuses columns(f) directly in drizzle-seed refine(...)", async () => {
+    const { db } = await createTestDb();
+    const customerFactory = defineFactory(seededCustomers, {
+      columns: (f) => ({
+        companyName: f.companyName(),
+        contactName: f.fullName(),
+        contactEmail: f.email(),
+      }),
+    });
+
+    await seed(db, { seededCustomers }).refine((f) => ({
+      seededCustomers: {
+        count: 3,
+        columns: customerFactory.columns(f),
+      },
+    }));
+
+    const customers = await db.select().from(seededCustomers);
+
+    expect(customers).toHaveLength(3);
+    expect(new Set(customers.map((customer) => customer.contactEmail)).size).toBe(3);
+  });
+
+  it("fails fast when columns(f) uses a non-unique generator for a unique column", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { seededCustomers },
+      adapter: echoAdapterWithGeneratedIds([]),
+      definitions: {
+        seededCustomers: defineFactory(seededCustomers, {
+          columns: (f) => ({
+            companyName: f.companyName(),
+            contactName: f.fullName(),
+            contactEmail: f.default({
+              defaultValue: "same@example.com",
+            }),
+          }),
+        }),
+      },
+    });
+
+    await expect(factories.seededCustomers.build()).rejects.toThrow(/unique/i);
+  });
+
+  it("requires explicit values for compound unique constraints", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { scopedArticles },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    await expect(
+      factories.scopedArticles.build({
+        tenantId: 1,
+      }),
+    ).rejects.toThrow(/compound unique constraint/i);
+
+    const article = await factories.scopedArticles.build({
+      slug: "tenant-1-home",
+      tenantId: 1,
+    });
+
+    expect(article.slug).toBe("tenant-1-home");
+  });
+
+  it("requires explicit values for partial unique indexes", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { partialEmailSubscribers },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    await expect(factories.partialEmailSubscribers.build()).rejects.toThrow(
+      /partial unique index/i,
+    );
+
+    const subscriber = await factories.partialEmailSubscribers.build({
+      email: "explicit@example.com",
+    });
+
+    expect(subscriber.email).toBe("explicit@example.com");
+  });
+
+  it("requires explicit values for expression-based unique indexes", async () => {
+    const factories = createFactories({
+      db: {} as object,
+      schema: { caseInsensitiveSlugs },
+      adapter: echoAdapterWithGeneratedIds([]),
+    });
+
+    await expect(factories.caseInsensitiveSlugs.build()).rejects.toThrow(
+      /expression-based unique index/i,
+    );
+
+    const row = await factories.caseInsensitiveSlugs.build({
+      slug: "Home",
+    });
+
+    expect(row.slug).toBe("Home");
+  });
+
+  it("verifyCreates() catches duplicate explicit unique values", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { seededCustomers },
+      definitions: {
+        seededCustomers: defineFactory(seededCustomers, {
+          defaults: {
+            companyName: "Acme",
+            contactEmail: "duplicate@example.com",
+            contactName: "Ada",
+          },
+        }),
+      },
+    });
+
+    const issues = await factories.verifyCreates();
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.key).toBe("seededCustomers");
+  });
+});
+
+async function createTestDb() {
+  const client = new PGlite();
+  clients.push(client);
+
+  await client.exec(`
+    create type user_role as enum ('member', 'admin');
+
+    create table users (
+      id serial primary key,
+      email text not null,
+      nickname varchar(24) not null,
+      role user_role not null
+    );
+
+    create table posts (
+      id serial primary key,
+      author_id integer not null references users(id),
+      title varchar(48) not null
+    );
+
+    create table sessions (
+      id serial primary key,
+      user_id integer not null references users(id),
+      token varchar(24) not null
+    );
+
+    create table review_comments (
+      id serial primary key,
+      author_id integer not null references users(id),
+      reviewer_id integer not null references users(id),
+      body text not null
+    );
+
+    create table employees (
+      id serial primary key,
+      manager_id integer references employees(id),
+      name text not null
+    );
+
+    create table members (
+      id serial primary key,
+      name text not null
+    );
+
+    create table groups (
+      id serial primary key,
+      label text not null
+    );
+
+    create table memberships (
+      id serial primary key,
+      member_id integer not null references members(id),
+      group_id integer not null references groups(id),
+      role text not null
+    );
+
+    create table order_versions (
+      order_id integer not null,
+      version integer not null,
+      note text not null,
+      primary key (order_id, version)
+    );
+
+    create table order_version_lines (
+      order_id integer not null,
+      version integer not null,
+      sku varchar(24) not null,
+      constraint order_version_lines_version_fk
+        foreign key (order_id, version) references order_versions(order_id, version)
+    );
+
+    create table constrained_articles (
+      id serial primary key,
+      rating integer not null,
+      status text not null,
+      constraint constrained_articles_rating_check check (rating >= 3 and rating <= 5),
+      constraint constrained_articles_status_check check (status in ('draft', 'published'))
+    );
+
+    create table paired_scores (
+      id serial primary key,
+      min_score integer not null,
+      max_score integer not null,
+      constraint paired_scores_order_check check (min_score < max_score)
+    );
+
+    create table seeded_customers (
+      id serial primary key,
+      company_name text not null,
+      contact_name text not null,
+      contact_email text not null unique
+    );
+
+    create table scoped_articles (
+      id serial primary key,
+      tenant_id integer not null,
+      slug varchar(48) not null,
+      constraint scoped_articles_tenant_slug_unique unique (tenant_id, slug)
+    );
+
+    create table partial_email_subscribers (
+      id serial primary key,
+      email text not null
+    );
+
+    create unique index partial_email_subscribers_email_present_unique
+      on partial_email_subscribers (email)
+      where email <> '';
+
+    create table case_insensitive_slugs (
+      id serial primary key,
+      slug text not null
+    );
+
+    create unique index case_insensitive_slugs_lower_slug_unique
+      on case_insensitive_slugs ((lower(slug)));
+  `);
+
+  return { client, db: drizzle(client) };
+}
+
+function echoAdapterWithGeneratedIds(
+  log: Array<{ table: string; values: Record<string, unknown> }>,
+) {
+  const nextIdByTable = new Map<string, number>();
+
+  return {
+    async create<TTable extends import("drizzle-orm").Table>({
+      table,
+      values,
+    }: {
+      table: TTable;
+      values: Record<string, unknown>;
+    }) {
+      const row = { ...values } as Record<string, unknown>;
+      const tableColumns = (await import("drizzle-orm")).getTableColumns(table) as Record<
+        string,
+        unknown
+      >;
+
+      if ("id" in tableColumns && row.id === undefined) {
+        const tableKey = tableName(table);
+        const nextId = (nextIdByTable.get(tableKey) ?? 0) + 1;
+        nextIdByTable.set(tableKey, nextId);
+        row.id = nextId;
+      }
+
+      log.push({
+        table: tableName(table),
+        values: row,
+      });
+
+      return row as import("drizzle-orm").InferSelectModel<TTable>;
+    },
+  };
+}
+
+function tableName(table: import("drizzle-orm").Table) {
+  const symbol = Object.getOwnPropertySymbols(table).find((value) =>
+    String(value).includes("Name"),
+  );
+
+  return symbol ? String((table as unknown as Record<symbol, unknown>)[symbol]) : "unknown";
+}

@@ -1,12 +1,9 @@
 export { defineFactory, type DefineFactoryOptions, type FactoryDefinition } from "./define";
-export { existing, type ExistingRow, type FactoryGraphNode } from "./core";
 export {
   createFactories,
-  type CreateFactoriesRqbV2Options,
+  type CreateFactoriesOptions,
+  type FactoryRegistry,
   type FactoryLintIssue,
-  type RqbV2FactoryGraphNode,
-  type RqbV2FactoryRegistry,
-  type RqbV2RuntimeFactory,
   type RuntimeFactory,
 } from "./runtime";
 export {
@@ -15,5 +12,9 @@ export {
   type FactoryInferenceContext,
   type FactoryInferenceOptions,
   type FactoryInferenceResolver,
+  type FactorySeedColumns,
+  type FactorySeedColumnsInput,
+  type FactorySeedFunctions,
+  type FactorySeedGenerator,
 } from "./types";
 export { drizzleReturning } from "./drizzle";

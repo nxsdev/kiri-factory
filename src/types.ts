@@ -4,4 +4,8 @@ export {
   type FactoryInferenceContext,
   type FactoryInferenceOptions,
   type FactoryInferenceResolver,
-} from "../../shared/src/types";
+  type FactorySeedColumns,
+  type FactorySeedColumnsInput,
+  type FactorySeedFunctions,
+  type FactorySeedGenerator,
+} from "./internal/types";

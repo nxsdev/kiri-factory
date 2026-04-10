@@ -1,3 +1,4 @@
+import type { getGeneratorsFunctions } from "drizzle-seed";
 import type { Column, InferInsertModel, InferSelectModel, Table } from "drizzle-orm";
 
 /**
@@ -113,3 +114,33 @@ export interface FactoryInferenceOptions<TTable extends Table = Table> {
    */
   customTypes?: Record<string, FactoryInferenceResolver<TTable>>;
 }
+
+/**
+ * Public drizzle-seed generator functions.
+ *
+ * This matches the callback argument used by `seed(...).refine((f) => ...)`.
+ */
+export type FactorySeedFunctions = ReturnType<typeof getGeneratorsFunctions>;
+
+/**
+ * Public drizzle-seed generator union returned from `f.*(...)`.
+ */
+export type FactorySeedGenerator = ReturnType<FactorySeedFunctions[keyof FactorySeedFunctions]>;
+
+/**
+ * Explicit drizzle-seed column generators shared by runtime factories and
+ * `seed(...).refine((f) => ...)`.
+ */
+export type FactorySeedColumns<TTable extends Table> = Partial<
+  Record<keyof InferInsertModel<TTable>, FactorySeedGenerator>
+>;
+
+/**
+ * Shared drizzle-seed column definition callback.
+ *
+ * This uses the same `f` callback object that Drizzle's official
+ * `seed(...).refine((f) => ...)` API exposes.
+ */
+export type FactorySeedColumnsInput<TTable extends Table> = (
+  f: FactorySeedFunctions,
+) => FactorySeedColumns<TTable>;

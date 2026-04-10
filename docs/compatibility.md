@@ -3,7 +3,7 @@
 See also:
 
 - [Docs index](./README.md)
-- [Getting started](./getting-started.md)
+- [Relations](./relations.md)
 - [Many-to-many patterns](./many-to-many.md)
 - [Inference and `CHECK` support](./inference.md)
 
@@ -11,19 +11,23 @@ See also:
 
 ## Support Matrix
 
-| Feature                                                        | Status          | Notes                                                     |
-| -------------------------------------------------------------- | --------------- | --------------------------------------------------------- |
-| PostgreSQL / MySQL / SQLite tables                             | Supported       | main target for schema-driven inference                   |
-| `pgSchema(...)`, `mysqlSchema(...)`, `sqliteTableCreator(...)` | Supported       | metadata is preserved                                     |
-| stable `relations(...)`                                        | Supported       | typed `for(...)`, `hasOne(...)`, `hasMany(...)`           |
-| `defineRelations(...)` via `kiri-factory/rqb-v2`               | Supported       | direct many-to-many planning included                     |
-| self relations and same-target relations                       | Supported       | use relation keys, not table names                        |
-| junction tables and composite primary keys                     | Supported       | preferred many-to-many path in stable Drizzle             |
-| simple single-column `CHECK`                                   | Best effort     | `>`, `>=`, `<`, `<=`, `BETWEEN`, `IN (...)`               |
-| `customType(...)`                                              | Resolver-driven | add inference resolvers where needed                      |
-| composite foreign keys                                         | Explicit only   | generic FK auto-create does not support multi-column keys |
-| complex `CHECK` SQL                                            | Manual override | use `state(...)`, overrides, or resolvers                 |
-| polymorphic relations                                          | Out of scope    | not part of `v0.1`                                        |
+| Feature                                                        | Status          | Notes                                                          |
+| -------------------------------------------------------------- | --------------- | -------------------------------------------------------------- |
+| PostgreSQL / MySQL / SQLite tables                             | Supported       | main target for schema-driven inference                        |
+| `pgSchema(...)`, `mysqlSchema(...)`, `sqliteTableCreator(...)` | Supported       | metadata is preserved                                          |
+| stable `relations(...)`                                        | Supported       | typed `for(...)` on child-side one-relations                   |
+| `defineRelations(...)` via `kiri-factory/rqb-v2`               | Supported       | typed `for(...)` on child-side one-relations                   |
+| self relations and same-target relations                       | Supported       | use relation keys, not table names                             |
+| junction tables and composite primary keys                     | Supported       | preferred many-to-many path                                    |
+| simple single-column `CHECK`                                   | Best effort     | `>`, `>=`, `<`, `<=`, `BETWEEN`, `IN (...)`                    |
+| `customType(...)`                                              | Resolver-driven | add inference resolvers where needed                           |
+| Postgres `uuid` / `point`                                      | Built-in        | simple deterministic defaults                                  |
+| single-column unique + shared `columns(f)`                     | Supported       | unique-safe `drizzle-seed` generators are enforced             |
+| composite foreign keys                                         | Explicit only   | use `for(...)` with an existing parent row or direct overrides |
+| compound / partial / expression unique constraints             | Explicit only   | do not rely on generic auto-generation                         |
+| direct many-to-many writes without a through row               | Not supported   | create the junction row explicitly                             |
+| complex `CHECK` SQL                                            | Manual override | use `state(...)`, overrides, or resolvers                      |
+| polymorphic relations                                          | Out of scope    | not part of `v0.1`                                             |
 
 ## What This Library Does Not Try To Do
 
@@ -32,7 +36,7 @@ See also:
 - a bulk seeding replacement for `drizzle-seed`
 - a general-purpose SQL parser for arbitrary business logic
 - a polymorphic relation framework
-- a universal persistence abstraction for every Drizzle driver without adapters
+- a deep graph DSL that hides every intermediate row
 
 ## Practical Guidance
 
@@ -40,36 +44,52 @@ Use `kiri-factory` when you want:
 
 - readable test setup
 - schema-driven defaults
-- reusable test data definitions
-- relation-aware graphs
+- reusable factory definitions
+- relation-aware row creation
 
 Use explicit factory logic when:
 
 - your business rules are encoded in complex SQL
 - your child row depends on a composite foreign key
 - your through table carries required payload columns
+- your table has compound, partial, or expression-based unique constraints
 - your custom types need domain-specific values
 
 ## Composite Foreign Keys
 
-`kiri-factory` can plan composite-key relations when you use explicit relation APIs such as `for(...)`, `hasOne(...)`, and `hasMany(...)`.
+`kiri-factory` can copy composite keys when you use explicit relation planning with `for(...)` and relation metadata.
 
-What does not work generically is the narrow table-only fallback:
+What does not work generically is implicit parent invention from plain `create()`:
 
-- `createFactories({ db, tables })`
-- missing parent keys auto-created from raw foreign-key metadata
-
-That fallback only auto-creates single-column foreign keys.
+- missing parent keys guessed from foreign-key metadata
+- multi-column foreign keys inferred without an explicit parent row
 
 If your child row depends on multiple columns:
 
-- prefer relation-aware runtimes with exported Drizzle relations
-- or create the parent first and pass it through `existing(...)`
+- create the parent first
+- pass that row to `for(...)`
 - or override the full key directly
 
 For a concrete pattern, continue with [Composite foreign keys](./recipes/composite-foreign-keys.md).
 
 ## Complex Constraints
+
+Non-trivial uniqueness falls into the same bucket:
+
+- compound unique groups
+- partial unique indexes
+- expression-based unique indexes
+
+`kiri-factory` does not try to prove those safe from generic auto-generated values.
+Set the participating columns explicitly through:
+
+- `columns(f)`
+- `defaults(...)`
+- `state(...)`
+- `for(...)`
+- call-site overrides
+
+Then use `verifyCreates()` against a disposable database when you want real insert coverage.
 
 `kiri-factory` only parses simple single-column `CHECK` constraints.
 
@@ -78,7 +98,7 @@ If your schema depends on:
 - multi-column `CHECK`
 - driver functions inside `CHECK`
 - business rules encoded in arbitrary SQL
-- `customType(...)` values that need domain-aware data
+- `customType(...)` values that need domain-aware data, such as driver-specific `point` mappings
 
 then treat inference as a starting point, not the source of truth.
 
@@ -87,8 +107,7 @@ In those cases, prefer:
 - `state(...)`
 - call-time overrides
 - runtime or definition-level inference resolvers
+- `verifyCreates()` against a disposable database when you want real insert coverage
 
-If your main concern is custom persistence or read-back behavior, continue with [Adapters, dialects, and runtime behavior](./adapters.md).
-
-If your main concern is many-to-many API choice, continue with [Many-to-many patterns](./many-to-many.md).  
-If your main concern is inferred values and `CHECK` behavior, continue with [Inference and `CHECK` support](./inference.md).
+If your main concern is custom persistence or transaction boundaries, continue with [Adapters and transactions](./adapters.md).  
+If your main concern is many-to-many API choice, continue with [Many-to-many patterns](./many-to-many.md).

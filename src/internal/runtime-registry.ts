@@ -1,8 +1,8 @@
 import type { Table } from "drizzle-orm";
 
-import { FACTORY_INSTANCE, fromTable, type AutoFactory } from "../core";
-import type { FactoryDefinition } from "../define";
-import type { FactoryBinding, FactoryInferenceOptions } from "../types";
+import { FACTORY_INSTANCE, fromTable, type AutoFactory } from "./core";
+import type { FactoryDefinition } from "./define";
+import type { FactoryBinding, FactoryInferenceOptions } from "./types";
 import { tableNameOf } from "./drizzle-introspection";
 import type { RuntimeRelations } from "./runtime-relations";
 
@@ -88,6 +88,30 @@ export function attachRegistryHelpers<TTables extends TableMap>(
       for (const [key, value] of Object.entries(registry)) {
         try {
           await value.build();
+        } catch (error) {
+          const table = tables[key as keyof TTables];
+
+          issues.push({
+            error: normalizeError(error),
+            key,
+            table: table ? tableNameOf(table) : key,
+          });
+        }
+      }
+
+      return issues;
+    },
+  });
+
+  Object.defineProperty(registry, "verifyCreates", {
+    enumerable: false,
+    async value() {
+      const issues: FactoryLintIssue[] = [];
+
+      for (const [key, value] of Object.entries(registry)) {
+        try {
+          await value.create();
+          await value.create();
         } catch (error) {
           const table = tables[key as keyof TTables];
 

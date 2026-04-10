@@ -1,11 +1,5 @@
 import type { Table } from "drizzle-orm";
 
-export interface RuntimeRelationThroughMetadata {
-  table: Table;
-  sourceKeys: string[];
-  targetKeys: string[];
-}
-
 export interface RuntimeRelationMetadata {
   key: string;
   kind: "one" | "many";
@@ -14,7 +8,6 @@ export interface RuntimeRelationMetadata {
   sourceKeys: string[];
   targetTable: Table;
   targetKeys: string[];
-  through?: RuntimeRelationThroughMetadata;
 }
 
 export interface RuntimeRelations {

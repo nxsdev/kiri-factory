@@ -1,7 +1,5 @@
 import type { InferInsertModel, InferSelectModel, Table } from "drizzle-orm";
 
-import { existing as existingRoot } from "../../shared/src/core";
-
 import type { FactoryDefinition } from "./define";
 
 type FactoryTransient = Record<string, unknown>;
@@ -19,46 +17,13 @@ export interface FactoryCallOptions<TTransient extends FactoryTransient = {}> {
 }
 
 /**
- * Wraps an existing row so relation planning can reuse it instead of creating another row.
- */
-export interface ExistingRow<TTable extends Table> {
-  readonly row: InferSelectModel<TTable>;
-  readonly table: TTable;
-}
-
-/**
- * One created row plus any explicitly planned related rows.
- */
-export interface FactoryGraphNode<
-  TRow extends Record<string, unknown> = Record<string, unknown>,
-  TRelations extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly row: TRow;
-  readonly source: "created" | "existing";
-  readonly relations: TRelations;
-}
-
-/**
- * Marks an existing row for reuse in relation planning.
- */
-export function existing<TTable extends Table>(
-  table: TTable,
-  row: InferSelectModel<TTable>,
-): ExistingRow<TTable> {
-  return existingRoot(
-    table as unknown as Parameters<typeof existingRoot>[0],
-    row as unknown as Parameters<typeof existingRoot>[1],
-  ) as unknown as ExistingRow<TTable>;
-}
-
-/**
  * Context available while refining a factory.
  */
 export type FactoryStateContext<TTable extends Table, TTransient extends FactoryTransient = {}> = {
   readonly seq: number;
   readonly strategy: "build" | "create";
   readonly table: TTable;
-  readonly transient: Readonly<TTransient>;
+  readonly transient: Readonly<Partial<TTransient>>;
   readonly values: Readonly<Partial<InferInsertModel<TTable>>>;
   readonly use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
     factory: FactoryDefinition<TOtherTable, TOtherTransient>,

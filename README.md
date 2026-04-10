@@ -2,15 +2,22 @@
 
 Schema-driven factories for Drizzle ORM.
 
-`kiri-factory` is built for real database tests and relation-heavy schemas. It is meant for the point where plain `db.insert(...)` calls and ad-hoc helpers stop scaling well.
+`kiri-factory` is built for real database tests where plain `db.insert(...)` starts to get noisy:
 
-- infers common required values from your schema
-- supports reusable factory definitions with traits and transient inputs
-- plans relation graphs for both stable `relations(...)` and RQB v2 `defineRelations(...)`
-- stays compatible with real database test flows instead of pushing you toward mocks
+- large tables with many required columns
+- repeated setup across hundreds or thousands of tests
+- relation-heavy schemas where foreign keys are easy to get wrong
 
-For bulk fake data, `drizzle-seed` is still the better tool.  
-For precise test setup, reusable scenarios, and relation-aware records, `kiri-factory` is the better fit.
+The core idea is simple:
+
+- `build()` returns one in-memory row
+- `buildMany()` returns many in-memory rows
+- `create()` returns one row
+- `createMany()` returns many rows
+- `for("relation", row)` wires foreign keys by relation name instead of raw column names
+- `defineFactory(..., { columns: (f) => ({ ... }) })` can share the same public `drizzle-seed` generators used by official `refine((f) => ...)` examples
+
+That keeps test setup explicit without turning the library into a second language.
 
 ## Install
 
@@ -22,35 +29,21 @@ Requirements:
 
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
-- `kiri-factory` and `kiri-factory/rqb-v1` are tested with `drizzle-orm` `0.45.x`
+- `kiri-factory` is tested with `drizzle-orm` `0.45.x`
 - `kiri-factory/rqb-v2` is tested with `drizzle-orm` `1.0.0-beta.21`
+
+`kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
 
 ## Choose Your Entrypoint
 
-| Import                | Use when                                                        | Relation model  |
-| --------------------- | --------------------------------------------------------------- | --------------- |
-| `kiri-factory`        | default path for table-only runtimes or stable `relations(...)` | stable / RQB v1 |
-| `kiri-factory/rqb-v1` | you want to pin the stable path explicitly                      | stable / RQB v1 |
-| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`                        | RQB v2          |
+| Import                | Use when                                  |
+| --------------------- | ----------------------------------------- |
+| `kiri-factory`        | your project uses stable `relations(...)` |
+| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
 
 ## Quick Start
 
-### Table-only runtime
-
-```ts
-import { createFactories } from "kiri-factory";
-import { users, posts } from "./db/schema";
-
-const factories = createFactories({
-  db,
-  tables: { users, posts },
-});
-
-const user = await factories.users.create();
-const post = await factories.posts.create();
-```
-
-### Stable relations
+### Stable `relations(...)`
 
 ```ts
 import * as schema from "./db/schema";
@@ -61,26 +54,33 @@ const factories = createFactories({
   schema,
 });
 
-await factories.posts.for("author").create();
-await factories.users.hasMany("posts", 2).createGraph();
+const author = await factories.users.create({
+  email: "author@example.com",
+});
+
+const post = await factories.posts.for("author", author).create({
+  title: "Hello",
+});
 ```
 
-### RQB v2
+### RQB v2 `defineRelations(...)`
 
 ```ts
-import { defineRelations } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/pglite";
 import { createFactories } from "kiri-factory/rqb-v2";
-import * as schema from "./db/schema";
+import { defineRelations } from "drizzle-orm";
+
+const db = drizzle({ client });
 
 const relations = defineRelations(schema, (r) => ({
-  users: {
-    groups: r.many.groups({
-      from: r.users.id.through(r.usersToGroups.userId),
-      to: r.groups.id.through(r.usersToGroups.groupId),
+  posts: {
+    author: r.one.users({
+      from: r.posts.authorId,
+      to: r.users.id,
     }),
   },
-  groups: {
-    participants: r.many.users(),
+  users: {
+    posts: r.many.posts(),
   },
 }));
 
@@ -89,20 +89,70 @@ const factories = createFactories({
   relations,
 });
 
-await factories.users.hasMany("groups", 2).create();
+const author = await factories.users.create();
+const post = await factories.posts.for("author", author).create();
 ```
+
+### Many-to-many
+
+Use the junction table explicitly in both stable and RQB v2.
+
+```ts
+const user = await factories.users.create();
+const group = await factories.groups.create();
+
+const membership = await factories.memberships.for("user", user).for("group", group).create({
+  role: "owner",
+});
+```
+
+## Why This Shape?
+
+The main value is inference plus explicit row creation.
+
+- schema metadata fills common required values for you
+- relation names replace fragile FK column wiring
+- returned values stay predictable because `create()` always returns the row for that table
+
+For bulk fake data, `drizzle-seed` is still the better tool.  
+For precise test setup and reusable factory definitions, `kiri-factory` is the better fit.
+
+You can also share column definitions with official `drizzle-seed`:
+
+```ts
+const customerFactory = defineFactory(customers, {
+  columns: (f) => ({
+    companyName: f.companyName(),
+    contactName: f.fullName(),
+    contactEmail: f.email(),
+  }),
+});
+
+await seed(db, schema).refine((f) => ({
+  customers: {
+    count: 1000,
+    columns: customerFactory.columns(f),
+  },
+}));
+```
+
+That reuse is intentionally narrow:
+
+- shared column generators come from the public `drizzle-seed` generator surface
+- bulk seeding behavior still belongs to `drizzle-seed`
+- runtime validation and safety rules still belong to `kiri-factory`
 
 ## Docs
 
-The docs are split into small Markdown files on purpose so humans, Codex, and Claude Code can jump directly to one topic at a time.
+The docs are split into small Markdown files so humans, Codex, and Claude Code can jump directly to one topic.
 
 - [Docs index](./docs/README.md)
 - [Getting started](./docs/getting-started.md)
 - [Defining factories](./docs/define-factory.md)
-- [Relations and graph returns](./docs/relations.md)
+- [Relations](./docs/relations.md)
 - [Many-to-many patterns](./docs/many-to-many.md)
 - [Inference and `CHECK` support](./docs/inference.md)
-- [Adapters, dialects, and runtime behavior](./docs/adapters.md)
+- [Adapters and transactions](./docs/adapters.md)
 - [Compatibility and limits](./docs/compatibility.md)
 - [Recipes](./docs/recipes/README.md)
 
@@ -117,5 +167,5 @@ pnpm test
 pnpm build
 ```
 
-`pnpm setup:hooks` installs the repo-local Vite+ Git hooks and points `core.hooksPath` at `.vite-hooks/_`.
-The pre-commit hook runs `vp staged`, which in turn applies `vp check --fix` to staged files.
+`pnpm setup:hooks` installs the repo-local Vite+ hooks.  
+The pre-commit hook runs `vp staged`, which applies `vp check --fix` to staged files.

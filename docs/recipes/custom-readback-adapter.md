@@ -3,7 +3,7 @@
 See also:
 
 - [Recipes](./README.md)
-- [Adapters, dialects, and runtime behavior](../adapters.md)
+- [Adapters and transactions](../adapters.md)
 - [Inference and `CHECK` support](../inference.md)
 
 If your driver does not support `returning()`, use a custom adapter that inserts first and then reads the row back.
@@ -13,7 +13,7 @@ If your driver does not support `returning()`, use a custom adapter that inserts
 ```ts
 const factories = createFactories({
   db,
-  tables: { users },
+  schema: { users },
   adapter: {
     async create({ db, table, values }) {
       const result = await db.insert(table).values(values);

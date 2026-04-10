@@ -4,12 +4,10 @@ import { columnKeyOf, getForeignKeys, getPrimaryKeyKeys, isTable } from "./rqb-v
 import {
   createRuntimeRelations,
   type RuntimeRelationMetadata,
-  type RuntimeRelationThroughMetadata,
   type RuntimeRelations,
 } from "./runtime-relations";
 
 type RelationsTableEntry = {
-  name: string;
   relations: Record<string, AnyRelation>;
   table: Table;
 };
@@ -45,7 +43,6 @@ export function extractRuntimeRelationsFromRqbV2(
         continue;
       }
 
-      const through = extractThroughMetadata(relation);
       const metadata: RuntimeRelationMetadata = {
         key,
         kind: relation.relationType,
@@ -55,13 +52,11 @@ export function extractRuntimeRelationsFromRqbV2(
           targetTable,
           sourceKeys,
           targetKeys,
-          through,
         ),
         sourceTable,
         sourceKeys,
         targetTable,
         targetKeys,
-        ...(through ? { through } : {}),
       };
 
       metadataEntries.push(metadata);
@@ -71,47 +66,14 @@ export function extractRuntimeRelationsFromRqbV2(
   return createRuntimeRelations(metadataEntries);
 }
 
-function extractThroughMetadata(relation: AnyRelation): RuntimeRelationThroughMetadata | undefined {
-  if (
-    !relation.through ||
-    !relation.throughTable ||
-    !isTable(relation.throughTable) ||
-    relation.through.source.length === 0 ||
-    relation.through.target.length === 0
-  ) {
-    return undefined;
-  }
-
-  const sourceKeys = relation.through.source
-    .map((column) => column._.key)
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
-  const targetKeys = relation.through.target
-    .map((column) => column._.key)
-    .filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  if (
-    sourceKeys.length !== relation.through.source.length ||
-    targetKeys.length !== relation.through.target.length
-  ) {
-    return undefined;
-  }
-
-  return {
-    sourceKeys,
-    table: relation.throughTable,
-    targetKeys,
-  };
-}
-
 function sourceOwnsForeignKey(
   relation: AnyRelation,
   sourceTable: Table,
   targetTable: Table,
   sourceKeys: string[],
   targetKeys: string[],
-  through: RuntimeRelationMetadata["through"],
 ) {
-  if (through) {
+  if (relation.through) {
     return false;
   }
 
@@ -161,7 +123,6 @@ function isRelationsTableEntry(value: unknown): value is RelationsTableEntry {
     typeof value === "object" &&
     "table" in value &&
     "relations" in value &&
-    "name" in value &&
     isTable((value as { table: unknown }).table),
   );
 }

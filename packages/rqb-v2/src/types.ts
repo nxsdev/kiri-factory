@@ -1,3 +1,4 @@
+import type { getGeneratorsFunctions } from "drizzle-seed";
 import type { Column, InferInsertModel, InferSelectModel, Table } from "drizzle-orm";
 
 /**
@@ -48,3 +49,15 @@ export interface FactoryInferenceOptions<TTable extends Table = Table> {
   columns?: Record<string, FactoryInferenceResolver<TTable>>;
   customTypes?: Record<string, FactoryInferenceResolver<TTable>>;
 }
+
+export type FactorySeedFunctions = ReturnType<typeof getGeneratorsFunctions>;
+
+export type FactorySeedGenerator = ReturnType<FactorySeedFunctions[keyof FactorySeedFunctions]>;
+
+export type FactorySeedColumns<TTable extends Table> = Partial<
+  Record<keyof InferInsertModel<TTable>, FactorySeedGenerator>
+>;
+
+export type FactorySeedColumnsInput<TTable extends Table> = (
+  f: FactorySeedFunctions,
+) => FactorySeedColumns<TTable>;

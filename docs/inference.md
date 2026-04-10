@@ -5,7 +5,7 @@ See also:
 - [Docs index](./README.md)
 - [Defining factories](./define-factory.md)
 - [Compatibility and limits](./compatibility.md)
-- [Adapters, dialects, and runtime behavior](./adapters.md)
+- [Adapters and transactions](./adapters.md)
 
 `kiri-factory` reads common Drizzle metadata and uses it to build rows automatically.
 
@@ -16,8 +16,34 @@ See also:
 - nullability
 - DB defaults and generated columns by omission
 - common scalar types like string, number, bigint, boolean, date, json, and arrays
-- simple foreign-key parents as a fallback in table-only runtimes
+- common UUID and spatial defaults such as Postgres `uuid` and `point`
 - simple single-column `CHECK` constraints
+- single-column unique fields when you provide shared `columns(f)` generators
+
+## What It Does Not Auto-Infer
+
+To keep test failures meaningful, kiri-factory does not auto-pick values for:
+
+- unresolved required foreign keys
+- `customType(...)` columns without explicit resolvers
+- compound, partial, and expression-based unique scenarios that cannot be proven safe
+- compound foreign-key scenarios that cannot be proven safe
+
+Provide those through `columns(f)`, `defaults`, `state(...)`, or call-time overrides.
+
+## Unique Columns
+
+For single-column unique fields, kiri-factory prefers strict behavior over best-effort behavior.
+
+- if a shared `columns(f)` generator can be made unique safely, kiri-factory uses it
+- if a unique field does not have a provably unique-safe generator, kiri-factory throws before insert
+- compound, partial, and expression-based unique constraints still need explicit modeling with overrides, `state(...)`, or relation wiring
+
+`verifyCreates()` is the right backstop when:
+
+- you intentionally use fixed explicit values for unique columns
+- your schema has non-trivial unique indexes
+- you want disposable-DB confirmation that two real inserts still work
 
 ## Simple `CHECK` Support
 
@@ -89,6 +115,23 @@ const embeddingFactory = defineFactory(embeddings, {
   inference: {
     columns: {
       "embeddings.embedding": ({ sequence }) => [sequence * 10],
+    },
+  },
+});
+```
+
+Spatial and driver-specific types follow this rule:
+
+- built-in metadata-rich cases like Postgres `uuid` and `point` get simple default values automatically
+- driver-specific or custom mapped types such as a MySQL `point` represented through `customType(...)` should use a `customTypes` resolver
+
+```ts
+const factories = createFactories({
+  db,
+  schema,
+  inference: {
+    customTypes: {
+      point: ({ sequence }) => ({ x: sequence, y: sequence + 1 }),
     },
   },
 });

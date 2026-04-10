@@ -1,4 +1,4 @@
-import { getTableColumns, type Column, type Table } from "drizzle-orm";
+import { getColumns, type Column, type Table } from "drizzle-orm";
 import { getTableConfig as getGelTableConfig } from "drizzle-orm/gel-core";
 import { getTableConfig as getMySqlTableConfig } from "drizzle-orm/mysql-core";
 import { getTableConfig as getPgTableConfig } from "drizzle-orm/pg-core";
@@ -52,7 +52,7 @@ export function getForeignKeys(table: Table) {
 export function getPrimaryKeyKeys(table: Table) {
   const keys = new Set<string>();
 
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+  for (const [columnKey, column] of Object.entries(getColumns(table)) as [string, Column][]) {
     const metadata = column as Column & { primary?: boolean };
 
     if (metadata.primary) {
@@ -76,7 +76,7 @@ export function getPrimaryKeyKeys(table: Table) {
 }
 
 export function columnKeyOf(table: Table, target: Column) {
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+  for (const [columnKey, column] of Object.entries(getColumns(table)) as [string, Column][]) {
     if (column === target) {
       return columnKey;
     }

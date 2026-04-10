@@ -7,21 +7,23 @@ import {
 } from "drizzle-orm";
 
 import { drizzleReturning } from "./drizzle";
-import { extractRuntimeRelations } from "./internal/drizzle-relations";
 import {
   getChecks,
+  getComplexUniqueConstraints,
   getForeignKeys,
   qualifiedTableNameOf,
-  getSingleColumnForeignKeys,
-  isTable,
   tableNameOf,
-} from "./internal/drizzle-introspection";
-import { type RuntimeRelationMetadata, type RuntimeRelations } from "./internal/runtime-relations";
+} from "./drizzle-introspection";
+import { evaluateFactorySeedColumns } from "./drizzle-seed-runtime";
+import { type RuntimeRelationMetadata, type RuntimeRelations } from "./runtime-relations";
 import type {
   FactoryAdapter,
   FactoryBinding,
   FactoryInferenceContext,
   FactoryInferenceOptions,
+  FactorySeedColumns,
+  FactorySeedColumnsInput,
+  FactorySeedFunctions,
 } from "./types";
 
 const SKIP_VALUE = Symbol("kiri-factory.skip");
@@ -43,14 +45,14 @@ type FactoryTransient = Record<string, unknown>;
 type InferInsert<TTable extends Table> = InferInsertModel<TTable>;
 type InferSelect<TTable extends Table> = InferSelectModel<TTable>;
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type UntypedOverrides = Record<string, unknown>;
-const EXISTING_ROW = Symbol("kiri-factory.existing-row");
 
 type RuntimeBinding<DB = unknown> = FactoryBinding<DB> & {
   inference?: FactoryInferenceOptions<Table>;
   registry?: Map<Table, AutoFactory<Table, FactoryTransient>>;
   relations?: RuntimeRelations;
 };
+type ValueSource = "auto" | "factory" | "override" | "relation";
+type ValueSourceMap = Record<string, ValueSource>;
 
 /**
  * Per-call column overrides passed to `build()` and `create()`.
@@ -65,42 +67,6 @@ export interface FactoryCallOptions<TTransient extends FactoryTransient = {}> {
    * Extra values available inside `state(...)`. They are never persisted.
    */
   transient?: Partial<TTransient>;
-}
-
-/**
- * Wraps an existing row so relation planning can reuse it instead of creating
- * another related row.
- */
-export interface ExistingRow<TTable extends Table> {
-  readonly [EXISTING_ROW]: true;
-  readonly row: InferSelect<TTable>;
-  readonly table: TTable;
-}
-
-/**
- * One created row plus any explicitly planned related rows.
- */
-export interface FactoryGraphNode<
-  TRow extends Record<string, unknown> = Record<string, unknown>,
-  TRelations extends Record<string, unknown> = Record<string, unknown>,
-> {
-  readonly row: TRow;
-  readonly source: "created" | "existing";
-  readonly relations: TRelations;
-}
-
-/**
- * Marks an existing row for reuse in relation planning.
- */
-export function existing<TTable extends Table>(
-  table: TTable,
-  row: InferSelect<TTable>,
-): ExistingRow<TTable> {
-  return Object.freeze({
-    [EXISTING_ROW]: true,
-    row,
-    table,
-  }) as ExistingRow<TTable>;
 }
 
 /**
@@ -122,7 +88,7 @@ export type FactoryStateContext<TTable extends Table, TTransient extends Factory
   /**
    * Extra values declared with `transient(...)` and optional per-call inputs.
    */
-  readonly transient: Readonly<TTransient>;
+  readonly transient: Readonly<Partial<TTransient>>;
   /**
    * Values resolved so far.
    */
@@ -197,7 +163,7 @@ type NormalizedTrait<TTable extends Table, TTransient extends FactoryTransient =
 
 type ResolvedExecution<TTable extends Table, TTransient extends FactoryTransient = {}> = {
   seq: number;
-  transient: TTransient;
+  transient: Partial<TTransient>;
   values: InferInsert<TTable>;
   use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
     factory: AutoFactory<TOtherTable, TOtherTransient>,
@@ -207,9 +173,9 @@ type ResolvedExecution<TTable extends Table, TTransient extends FactoryTransient
 type InternalState<TTable extends Table, TTransient extends FactoryTransient = {}> = {
   table: TTable;
   sequence: SequenceTracker;
+  columnsInput?: FactorySeedColumnsInput<TTable>;
   inference: FactoryInferenceOptions<TTable>;
   runtime?: RuntimeBinding;
-  hasRelations: HasRelationPlan[];
   forRelations: ForRelationPlan[];
   traits: Record<string, NormalizedTrait<TTable, TTransient>>;
   activeTraits: string[];
@@ -248,26 +214,16 @@ type SimpleCheckHints = {
 };
 
 const simpleCheckCache = new WeakMap<Table, Map<string, SimpleCheckHints>>();
+const tableColumnEntriesCache = new WeakMap<Table, Array<[string, Column]>>();
+const tableColumnRecordCache = new WeakMap<Table, Record<string, Column>>();
+const requiredColumnKeysCache = new WeakMap<Table, string[]>();
 
 type ListOverridesInput<TTable extends Table> =
   | FactoryOverrides<TTable>
   | ((index: number) => FactoryOverrides<TTable>);
-type UntypedListOverridesInput = UntypedOverrides | ((index: number) => UntypedOverrides);
-type UntypedRelationInput =
-  | UntypedOverrides
-  | ExistingRow<Table>
-  | AutoFactory<Table, FactoryTransient>;
-type UntypedGraphNode = FactoryGraphNode<Record<string, unknown>, UntypedGraphRelations>;
-type UntypedGraphRelations = Record<string, UntypedGraphNode | UntypedGraphNode[]>;
+type UntypedRelationInput = Record<string, unknown> | undefined;
 type ForRelationPlan = {
   input: UntypedRelationInput;
-  relationKey: string;
-};
-type HasRelationPlan = {
-  count: number;
-  expectedKind: "one" | "many";
-  input: AutoFactory<Table, FactoryTransient> | undefined;
-  overrides: UntypedListOverridesInput;
   relationKey: string;
 };
 
@@ -402,67 +358,23 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   }
 
   /**
+   * Returns the shared drizzle-seed column generators for this factory.
+   */
+  columns(f: FactorySeedFunctions): FactorySeedColumns<TTable> {
+    return this.#state.columnsInput?.(f) ?? {};
+  }
+
+  /**
    * Plans a belongs-to relation for the next `create()` call.
    *
    * This only works when the connected runtime was created from a Drizzle
    * schema object that also exports `relations(...)`.
    */
-  for(relationKey: string, input: UntypedRelationInput = {}) {
+  for(relationKey: string, input?: UntypedRelationInput) {
     assertUniqueRelationPlan(this.#state.forRelations, relationKey, "for");
 
     return this.#clone({
       forRelations: [...this.#state.forRelations, { input, relationKey }],
-    });
-  }
-
-  /**
-   * Plans a single child row for the next `create()` call.
-   *
-   * This only works when the connected runtime was created from a Drizzle
-   * schema object that also exports `relations(...)`.
-   */
-  hasOne(relationKey: string, input: UntypedOverrides | AutoFactory<Table, FactoryTransient> = {}) {
-    assertUniqueRelationPlan(this.#state.hasRelations, relationKey, "hasOne");
-
-    return this.#clone({
-      hasRelations: [
-        ...this.#state.hasRelations,
-        {
-          count: 1,
-          expectedKind: "one",
-          input: isFactoryInstance(input) ? input : undefined,
-          overrides: isFactoryInstance(input) ? {} : input,
-          relationKey,
-        },
-      ],
-    });
-  }
-
-  /**
-   * Plans many child rows for the next `create()` call.
-   *
-   * This only works when the connected runtime was created from a Drizzle
-   * schema object that also exports `relations(...)`.
-   */
-  hasMany(
-    relationKey: string,
-    count = 1,
-    input: UntypedListOverridesInput | AutoFactory<Table, FactoryTransient> = {},
-  ) {
-    assertPositiveCount(count);
-    assertUniqueRelationPlan(this.#state.hasRelations, relationKey, "hasMany");
-
-    return this.#clone({
-      hasRelations: [
-        ...this.#state.hasRelations,
-        {
-          count,
-          expectedKind: "many",
-          input: isFactoryInstance(input) ? input : undefined,
-          overrides: isFactoryInstance(input) ? {} : input,
-          relationKey,
-        },
-      ],
     });
   }
 
@@ -484,35 +396,23 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   }
 
   /**
-   * Alias for `build()`.
-   */
-  async make(
-    overrides: FactoryOverrides<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    return this.build(overrides, options);
-  }
-
-  /**
    * Builds many rows in memory.
    */
-  async buildList(
+  async buildMany(
     count: number,
     overrides: ListOverridesInput<TTable> = {},
     options: FactoryCallOptions<TTransient> = {},
   ) {
-    return this.#buildListLike(count, overrides, options, "build");
-  }
+    assertPositiveCount(count);
+    const results: InferInsert<TTable>[] = [];
 
-  /**
-   * Alias for `buildList()`.
-   */
-  async makeList(
-    count: number,
-    overrides: ListOverridesInput<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    return this.buildList(count, overrides, options);
+    for (let index = 0; index < count; index += 1) {
+      results.push(
+        (await this.#resolve("build", resolveListOverrides(overrides, index), options, [])).values,
+      );
+    }
+
+    return results;
   }
 
   /**
@@ -526,20 +426,9 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   }
 
   /**
-   * Builds one row, persists it, and returns a nested graph of explicitly
-   * planned related rows.
-   */
-  async createGraph(
-    overrides: FactoryOverrides<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    return this.#createGraphInternal(overrides, options, []);
-  }
-
-  /**
    * Builds and persists many rows.
    */
-  async createList(
+  async createMany(
     count: number,
     overrides: ListOverridesInput<TTable> = {},
     options: FactoryCallOptions<TTransient> = {},
@@ -549,26 +438,6 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
 
     for (let index = 0; index < count; index += 1) {
       results.push(await this.#createInternal(resolveListOverrides(overrides, index), options, []));
-    }
-
-    return results;
-  }
-
-  /**
-   * Builds, persists, and returns many nested graphs.
-   */
-  async createGraphList(
-    count: number,
-    overrides: ListOverridesInput<TTable> = {},
-    options: FactoryCallOptions<TTransient> = {},
-  ) {
-    assertPositiveCount(count);
-    const results: Array<FactoryGraphNode<InferSelect<TTable>, UntypedGraphRelations>> = [];
-
-    for (let index = 0; index < count; index += 1) {
-      results.push(
-        await this.#createGraphInternal(resolveListOverrides(overrides, index), options, []),
-      );
     }
 
     return results;
@@ -586,44 +455,18 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
     options: FactoryCallOptions<TTransient>,
     path: Table[],
   ) {
-    return (await this.#createNodeInternal(overrides, options, path, false)).row;
-  }
-
-  async #createGraphInternal(
-    overrides: FactoryOverrides<TTable>,
-    options: FactoryCallOptions<TTransient>,
-    path: Table[],
-  ) {
-    return this.#createNodeInternal(overrides, options, path, true);
-  }
-
-  async #createNodeInternal(
-    overrides: FactoryOverrides<TTable>,
-    options: FactoryCallOptions<TTransient>,
-    path: Table[],
-    includeGraph: boolean,
-  ): Promise<FactoryGraphNode<InferSelect<TTable>, UntypedGraphRelations>> {
     if (!this.#state.runtime) {
       throw new Error(
         `Factory for table "${tableNameOf(this.#state.table)}" is not connected. Call connect(db) before create().`,
       );
     }
 
-    const relations = {} as UntypedGraphRelations;
-    const resolved = await this.#resolve(
-      "create",
-      overrides,
-      options,
-      path,
-      includeGraph ? relations : undefined,
-    );
+    const resolved = await this.#resolve("create", overrides, options, path);
     const row = await this.#state.runtime.adapter.create({
       db: this.#state.runtime.db,
       table: this.#state.table,
       values: resolved.values,
     });
-
-    await this.#createPlannedChildren(row, path, includeGraph ? relations : undefined);
 
     const context = this.#createContext(
       "create",
@@ -640,29 +483,7 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
       });
     }
 
-    return {
-      relations,
-      row,
-      source: "created",
-    };
-  }
-
-  async #buildListLike(
-    count: number,
-    overrides: ListOverridesInput<TTable>,
-    options: FactoryCallOptions<TTransient>,
-    strategy: "build" | "create",
-  ) {
-    assertPositiveCount(count);
-    const results: InferInsert<TTable>[] = [];
-
-    for (let index = 0; index < count; index += 1) {
-      results.push(
-        (await this.#resolve(strategy, resolveListOverrides(overrides, index), options, [])).values,
-      );
-    }
-
-    return results;
+    return row;
   }
 
   async #resolve(
@@ -670,10 +491,9 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
     overrides: FactoryOverrides<TTable>,
     options: FactoryCallOptions<TTransient>,
     path: Table[],
-    graph?: UntypedGraphRelations,
   ): Promise<ResolvedExecution<TTable, TTransient>> {
     const seq = this.#state.sequence.next();
-    const transient = mergeDefined(this.#state.transientDefaults, options.transient) as TTransient;
+    const transient = mergeDefined(this.#state.transientDefaults, options.transient);
     const use = <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
       factory: AutoFactory<TOtherTable, TOtherTransient>,
     ) => (this.#state.runtime ? factory.connect(this.#state.runtime) : factory);
@@ -684,21 +504,32 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
       this.#state.inference,
       this.#state.runtime?.inference,
     );
+    let valueSources = createValueSourceMap(values, "auto");
+
+    values = mergeDefinedWithSource(
+      values,
+      evaluateFactorySeedColumns(this.#state.table, this.#state.columnsInput, seq) as Partial<
+        InferInsert<TTable>
+      >,
+      valueSources,
+      "factory",
+    );
 
     for (const resolver of this.#collectStateResolvers()) {
       const patch = await resolver(this.#createContext(strategy, seq, transient, values, use));
-      values = mergeDefined(values, patch);
+      values = mergeDefinedWithSource(values, patch, valueSources, "factory");
     }
 
-    values = mergeDefined(values, overrides);
+    values = mergeDefinedWithSource(values, overrides, valueSources, "override");
     values = pruneUndefined(values) as Partial<InferInsert<TTable>>;
+    valueSources = pruneUndefinedSources(values, valueSources);
 
     if (strategy === "create") {
-      values = await this.#resolvePlannedParents(values, path, graph);
-      values = await this.#resolveMissingForeignKeys(values, path);
+      ({ valueSources, values } = await this.#resolvePlannedParents(values, valueSources, path));
     }
 
     ensureRequiredColumns(this.#state.table, values);
+    ensureSafeUniqueConstraints(this.#state.table, values, valueSources);
 
     const finalValues = values as InferInsert<TTable>;
     const buildContext = this.#createContext(strategy, seq, transient, finalValues, use);
@@ -717,21 +548,22 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
 
   async #resolvePlannedParents(
     values: Partial<InferInsert<TTable>>,
+    valueSources: ValueSourceMap,
     path: Table[],
-    graph?: UntypedGraphRelations,
   ) {
     if (!this.#state.runtime?.registry || !this.#state.runtime.relations) {
-      return values;
+      return { valueSources, values };
     }
 
     const resolved = { ...values };
+    const nextSources = { ...valueSources };
 
     for (const plan of this.#state.forRelations) {
       const relation = this.#getRequiredRelation(plan.relationKey);
 
       if (!canUseForRelation(relation)) {
         throw new Error(
-          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" is not a belongs-to relation. Use hasOne(...) or hasMany(...) on the parent side instead.`,
+          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" does not own the foreign key. Use for(...) from the child side or create the related row separately.`,
         );
       }
 
@@ -743,36 +575,9 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
         );
       }
 
-      const parentFactoryInput = isFactoryInstance(plan.input)
-        ? this.#state.runtime
-          ? plan.input.connect(this.#state.runtime)
-          : plan.input
-        : parentFactory;
-      const parentOverrides =
-        isFactoryInstance(plan.input) || isExistingRow(plan.input) ? {} : plan.input;
-      if (isExistingRow(plan.input) && plan.input.table !== relation.targetTable) {
-        throw new Error(
-          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" expects "${tableNameOf(relation.targetTable)}", but existing(...) received "${tableNameOf(plan.input.table)}".`,
-        );
-      }
-      const parentNode = isExistingRow(plan.input)
-        ? ({
-            relations: {},
-            row: plan.input.row,
-            source: "existing",
-          } satisfies UntypedGraphNode)
-        : graph
-          ? await parentFactoryInput.#createGraphInternal(parentOverrides, {}, [
-              ...path,
-              this.#state.table,
-            ])
-          : undefined;
-      const parent = parentNode
-        ? parentNode.row
-        : await parentFactoryInput.#createInternal(parentOverrides, {}, [
-            ...path,
-            this.#state.table,
-          ]);
+      const parent = plan.input
+        ? plan.input
+        : await parentFactory.#createInternal({}, {}, [...path, this.#state.table]);
 
       for (let index = 0; index < relation.sourceKeys.length; index += 1) {
         const sourceKey = relation.sourceKeys[index]!;
@@ -781,227 +586,14 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
         (resolved as Record<string, unknown>)[sourceKey] = (parent as Record<string, unknown>)[
           targetKey
         ];
-      }
-
-      if (graph && parentNode) {
-        graph[plan.relationKey] = parentNode;
+        nextSources[sourceKey] = "relation";
       }
     }
 
-    return resolved;
-  }
-
-  async #resolveMissingForeignKeys(values: Partial<InferInsert<TTable>>, path: Table[]) {
-    if (!this.#state.runtime?.registry) {
-      return values;
-    }
-
-    const missing = listMissingRequiredColumns(this.#state.table, values);
-
-    if (missing.length === 0) {
-      return values;
-    }
-
-    const resolved = { ...values };
-    const foreignKeys = getSingleColumnForeignKeys(this.#state.table);
-
-    for (const foreignKey of foreignKeys) {
-      if (!(foreignKey.localKey in resolved) && missing.includes(foreignKey.localKey)) {
-        const parentFactory = this.#state.runtime.registry.get(foreignKey.foreignTable);
-
-        if (!parentFactory) {
-          continue;
-        }
-
-        if (path.includes(foreignKey.foreignTable)) {
-          throw new Error(
-            `Could not auto-create "${tableNameOf(foreignKey.foreignTable)}" for "${tableNameOf(this.#state.table)}" because the foreign-key chain is cyclic. Add explicit overrides or state().`,
-          );
-        }
-
-        const parent = await parentFactory.#createInternal({}, {}, [...path, this.#state.table]);
-        (resolved as Record<string, unknown>)[foreignKey.localKey] = (
-          parent as Record<string, unknown>
-        )[foreignKey.foreignKey];
-      }
-    }
-
-    return resolved;
-  }
-
-  async #createPlannedChildren(
-    row: InferSelect<TTable>,
-    path: Table[],
-    graph?: UntypedGraphRelations,
-  ) {
-    if (!this.#state.runtime?.registry || !this.#state.runtime.relations) {
-      return;
-    }
-
-    for (const plan of this.#state.hasRelations) {
-      const relation = this.#getRequiredRelation(plan.relationKey);
-
-      if (plan.expectedKind === "one") {
-        if (!canUseHasOneRelation(relation)) {
-          throw new Error(
-            `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" is not a has-one relation. Use hasMany(...) for to-many edges or for(...) on the child side instead.`,
-          );
-        }
-      } else if (plan.expectedKind === "many") {
-        if (!canUseHasManyRelation(relation)) {
-          throw new Error(
-            `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" is not a has-many relation. Use hasOne(...) for inverse one-to-one edges or for(...) on the child side instead.`,
-          );
-        }
-      }
-
-      const childFactory = this.#state.runtime.registry.get(relation.targetTable);
-
-      if (!childFactory) {
-        throw new Error(
-          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" points to "${tableNameOf(relation.targetTable)}", but that table is not registered in this runtime.`,
-        );
-      }
-
-      const plannedChildFactory =
-        isFactoryInstance(plan.input) && this.#state.runtime
-          ? plan.input.connect(this.#state.runtime)
-          : isFactoryInstance(plan.input)
-            ? plan.input
-            : childFactory;
-
-      if (!relation.through) {
-        this.#assertChildFactoryDoesNotOverrideOwnedKeys(relation, plannedChildFactory);
-      }
-      const createdChildren: UntypedGraphNode[] = [];
-
-      for (let index = 0; index < plan.count; index += 1) {
-        const overrides = {
-          ...resolveUntypedListOverrides(plan.overrides, index),
-        };
-
-        if (!relation.through) {
-          for (
-            let relationIndex = 0;
-            relationIndex < relation.sourceKeys.length;
-            relationIndex += 1
-          ) {
-            const sourceKey = relation.sourceKeys[relationIndex]!;
-            const targetKey = relation.targetKeys[relationIndex]!;
-
-            overrides[targetKey] = (row as Record<string, unknown>)[sourceKey];
-          }
-        }
-
-        const childGraph = graph
-          ? await plannedChildFactory.#createGraphInternal(
-              overrides as FactoryOverrides<Table>,
-              {},
-              [...path, this.#state.table],
-            )
-          : undefined;
-
-        if (!graph) {
-          const childRow = await plannedChildFactory.#createInternal(
-            overrides as FactoryOverrides<Table>,
-            {},
-            [...path, this.#state.table],
-          );
-
-          if (relation.through) {
-            await this.#createThroughRow(relation, row, childRow, path);
-          }
-        } else if (childGraph) {
-          if (relation.through) {
-            await this.#createThroughRow(relation, row, childGraph.row, path);
-          }
-
-          createdChildren.push(childGraph);
-        }
-      }
-
-      if (graph) {
-        if (plan.expectedKind === "one") {
-          if (createdChildren[0]) {
-            graph[plan.relationKey] = createdChildren[0];
-          }
-        } else {
-          graph[plan.relationKey] = createdChildren;
-        }
-      }
-    }
-  }
-
-  async #createThroughRow(
-    relation: RuntimeRelationMetadata,
-    sourceRow: InferSelect<TTable>,
-    targetRow: Record<string, unknown>,
-    path: Table[],
-  ) {
-    if (!relation.through || !this.#state.runtime?.registry) {
-      return;
-    }
-
-    const throughFactory = this.#state.runtime.registry.get(relation.through.table);
-
-    if (!throughFactory) {
-      throw new Error(
-        `Relation "${relation.key}" on "${tableNameOf(this.#state.table)}" requires through table "${tableNameOf(relation.through.table)}", but that table is not registered in this runtime.`,
-      );
-    }
-
-    const overrides: Record<string, unknown> = {};
-
-    for (let index = 0; index < relation.sourceKeys.length; index += 1) {
-      const sourceKey = relation.sourceKeys[index]!;
-      const throughKey = relation.through.sourceKeys[index]!;
-
-      overrides[throughKey] = (sourceRow as Record<string, unknown>)[sourceKey];
-    }
-
-    for (let index = 0; index < relation.targetKeys.length; index += 1) {
-      const targetKey = relation.targetKeys[index]!;
-      const throughKey = relation.through.targetKeys[index]!;
-
-      overrides[throughKey] = targetRow[targetKey];
-    }
-
-    await throughFactory.#createInternal(overrides as FactoryOverrides<Table>, {}, [
-      ...path,
-      this.#state.table,
-      relation.targetTable,
-    ]);
-  }
-
-  #assertChildFactoryDoesNotOverrideOwnedKeys(
-    relation: RuntimeRelationMetadata,
-    childFactory: AutoFactory<Table, FactoryTransient>,
-  ) {
-    const runtimeRelations = childFactory.#state.runtime?.relations;
-
-    if (!runtimeRelations) {
-      return;
-    }
-
-    const ownedKeys = new Set(relation.targetKeys);
-
-    for (const plan of childFactory.#state.forRelations) {
-      const childRelation = runtimeRelations.get(childFactory.#state.table, plan.relationKey);
-
-      if (!childRelation || childRelation.through || !childRelation.sourceOwnsForeignKey) {
-        continue;
-      }
-
-      const overlappingKeys = childRelation.sourceKeys.filter((key) => ownedKeys.has(key));
-
-      if (overlappingKeys.length === 0) {
-        continue;
-      }
-
-      throw new Error(
-        `Relation "${relation.key}" on "${tableNameOf(this.#state.table)}" already owns child keys ${overlappingKeys.join(", ")} on "${tableNameOf(childFactory.#state.table)}". Remove the reciprocal for("${plan.relationKey}") plan from the child factory.`,
-      );
-    }
+    return {
+      valueSources: nextSources,
+      values: resolved,
+    };
   }
 
   #collectStateResolvers() {
@@ -1031,7 +623,7 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
   #createContext(
     strategy: "build" | "create",
     seq: number,
-    transient: TTransient,
+    transient: Partial<TTransient>,
     values: Partial<InferInsert<TTable>>,
     use: <TOtherTable extends Table, TOtherTransient extends FactoryTransient>(
       factory: AutoFactory<TOtherTable, TOtherTransient>,
@@ -1066,14 +658,15 @@ export class AutoFactory<TTable extends Table, TTransient extends FactoryTransie
 export function fromTable<TTable extends Table>(
   table: TTable,
   options: {
+    columns?: FactorySeedColumnsInput<TTable>;
     inference?: FactoryInferenceOptions<TTable>;
   } = {},
 ) {
   return new AutoFactory<TTable>({
     table,
     sequence: new SequenceTracker(),
+    ...(options.columns ? { columnsInput: options.columns } : {}),
     inference: options.inference ?? {},
-    hasRelations: [],
     forRelations: [],
     traits: {},
     activeTraits: [],
@@ -1082,103 +675,6 @@ export function fromTable<TTable extends Table>(
     afterBuildHooks: [],
     afterCreateHooks: [],
     transientDefaults: {},
-  });
-}
-
-type ExtractTables<TSchema extends Record<string, unknown>> = {
-  [K in keyof TSchema as TSchema[K] extends Table ? K : never]: TSchema[K];
-};
-
-export type SchemaFactories<TSchema extends Record<string, unknown>> = Simplify<
-  {
-    [K in keyof ExtractTables<TSchema>]: ExtractTables<TSchema>[K] extends Table
-      ? AutoFactory<ExtractTables<TSchema>[K]>
-      : never;
-  } & {
-    connect<DB>(db: DB, options?: { adapter?: FactoryAdapter<DB> }): SchemaFactories<TSchema>;
-    connect<DB>(binding: FactoryBinding<DB>): SchemaFactories<TSchema>;
-    resetSequences(next?: number): void;
-  }
->;
-
-/**
- * Creates a factory registry for every Drizzle table in a schema object.
- */
-export function fromSchema<TSchema extends Record<string, unknown>>(
-  schema: TSchema,
-): SchemaFactories<TSchema> {
-  const registry: Record<string, unknown> = {};
-  const entries: Array<[Table, string]> = [];
-  const runtimeRelations = extractRuntimeRelations(schema);
-
-  for (const [key, value] of Object.entries(schema)) {
-    if (isTable(value)) {
-      registry[key] = fromTable(value);
-      entries.push([value, key]);
-    }
-  }
-
-  attachRegistryHelpers(registry, entries, runtimeRelations);
-
-  return registry as SchemaFactories<TSchema>;
-}
-
-function attachRegistryHelpers(
-  registry: Record<string, unknown>,
-  entries: Array<[Table, string]>,
-  runtimeRelations?: RuntimeRelations,
-) {
-  Object.defineProperty(registry, "connect", {
-    enumerable: false,
-    value<DB>(dbOrBinding: DB | FactoryBinding<DB>, options?: { adapter?: FactoryAdapter<DB> }) {
-      const baseRuntime = normalizeRuntime(
-        dbOrBinding,
-        options?.adapter,
-        undefined,
-        runtimeRelations,
-        undefined,
-      );
-      const connected: Record<string, unknown> = {};
-
-      for (const [key, value] of Object.entries(registry)) {
-        if (isFactoryInstance(value)) {
-          connected[key] = value.connect(baseRuntime);
-        }
-      }
-
-      const factoryMap = new Map<Table, AutoFactory<Table, FactoryTransient>>();
-
-      for (const [table, key] of entries) {
-        const value = connected[key];
-        if (isFactoryInstance(value)) {
-          factoryMap.set(table, value as AutoFactory<Table, FactoryTransient>);
-        }
-      }
-
-      const runtime = withOptionalRegistry(baseRuntime, factoryMap, runtimeRelations);
-      const resolved: Record<string, unknown> = {};
-
-      for (const [key, value] of Object.entries(connected)) {
-        if (isFactoryInstance(value)) {
-          resolved[key] = value.connect(runtime);
-        }
-      }
-
-      attachRegistryHelpers(resolved, entries, runtimeRelations);
-
-      return resolved;
-    },
-  });
-
-  Object.defineProperty(registry, "resetSequences", {
-    enumerable: false,
-    value(next = 0) {
-      for (const value of Object.values(registry)) {
-        if (isFactoryInstance(value)) {
-          value.resetSequence(next);
-        }
-      }
-    },
   });
 }
 
@@ -1290,14 +786,10 @@ function resolveListOverrides<TTable extends Table>(
   return typeof input === "function" ? input(index) : input;
 }
 
-function resolveUntypedListOverrides(input: UntypedListOverridesInput, index: number) {
-  return typeof input === "function" ? input(index) : input;
-}
-
 function assertUniqueRelationPlan(
   plans: Array<{ relationKey: string }>,
   relationKey: string,
-  methodName: "for" | "hasOne" | "hasMany",
+  methodName: "for",
 ) {
   if (plans.some((plan) => plan.relationKey === relationKey)) {
     throw new Error(
@@ -1308,14 +800,6 @@ function assertUniqueRelationPlan(
 
 function canUseForRelation(relation: RuntimeRelationMetadata) {
   return relation.kind === "one" && relation.sourceOwnsForeignKey;
-}
-
-function canUseHasOneRelation(relation: RuntimeRelationMetadata) {
-  return relation.kind === "one" && !relation.sourceOwnsForeignKey;
-}
-
-function canUseHasManyRelation(relation: RuntimeRelationMetadata) {
-  return relation.kind === "many";
 }
 
 function assertPositiveCount(count: number) {
@@ -1338,7 +822,7 @@ function inferAutoValues<TTable extends Table>(
   );
   const relationColumns = new Set(relationOwnedKeys);
 
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+  for (const [columnKey, column] of getTableColumnEntries(table)) {
     if (foreignKeyColumns.has(columnKey) || relationColumns.has(columnKey)) {
       continue;
     }
@@ -1371,24 +855,6 @@ function getRelationOwnedColumnKeys(table: Table, relations?: RuntimeRelations) 
   return [...tableRelations.values()]
     .filter((relation) => relation.sourceOwnsForeignKey)
     .flatMap((relation) => relation.sourceKeys);
-}
-
-function isExistingRow(value: unknown): value is ExistingRow<Table> {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    EXISTING_ROW in (value as Record<PropertyKey, unknown>) &&
-    "row" in (value as Record<PropertyKey, unknown>) &&
-    "table" in (value as Record<PropertyKey, unknown>),
-  );
-}
-
-function isFactoryInstance(value: unknown): value is AutoFactory<Table, FactoryTransient> {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    FACTORY_INSTANCE in (value as Record<PropertyKey, unknown>),
-  );
 }
 
 function inferColumnValue<TTable extends Table>(
@@ -1432,6 +898,12 @@ function inferColumnValue<TTable extends Table>(
     return explicit as InferredValue;
   }
 
+  const spatial = inferSpatialValue(sqlType, metadata.dataType, sequence);
+
+  if (spatial !== SKIP_VALUE) {
+    return spatial;
+  }
+
   const enumValues = metadata.enumValues;
   if (enumValues && enumValues.length > 0) {
     return enumValues[Math.max(0, (sequence - 1) % enumValues.length)] ?? SKIP_VALUE;
@@ -1470,6 +942,7 @@ function inferColumnValue<TTable extends Table>(
       return inferStringValue(
         tableName,
         normalizedName,
+        sqlType,
         metadata.columnType,
         metadata.config?.length,
         sequence,
@@ -1482,6 +955,7 @@ function inferColumnValue<TTable extends Table>(
 function inferStringValue(
   tableName: string,
   columnKey: string,
+  sqlType: string,
   columnType: string | undefined,
   maxLength: number | undefined,
   sequence: number,
@@ -1489,7 +963,7 @@ function inferStringValue(
   const applyLength = (value: string) =>
     typeof maxLength === "number" ? value.slice(0, Math.max(0, maxLength)) : value;
 
-  if (columnType === "PgUUID") {
+  if (columnType === "PgUUID" || normalizeSqlType(sqlType).toLowerCase() === "uuid") {
     return applyLength(deterministicUuid(sequence));
   }
 
@@ -1523,6 +997,27 @@ function inferStringValue(
 function deterministicUuid(sequence: number) {
   const suffix = sequence.toString(16).padStart(12, "0").slice(-12);
   return `00000000-0000-4000-8000-${suffix}`;
+}
+
+function inferSpatialValue(sqlType: string, dataType: string | undefined, sequence: number) {
+  const normalizedSqlType = normalizeSqlType(sqlType).toLowerCase();
+
+  if (normalizedSqlType !== "point" && normalizedSqlType !== "geometry") {
+    return SKIP_VALUE;
+  }
+
+  if (dataType === "array") {
+    return [sequence, sequence + 1];
+  }
+
+  if (dataType === "json") {
+    return {
+      x: sequence,
+      y: sequence + 1,
+    };
+  }
+
+  return SKIP_VALUE;
 }
 
 function resolveExplicitInference<TTable extends Table>(
@@ -1834,7 +1329,7 @@ function columnKeyFromCheckChunk(table: Table, chunk: unknown) {
     return undefined;
   }
 
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
+  for (const [columnKey, column] of getTableColumnEntries(table)) {
     if ((column as { name?: string }).name === candidateName) {
       return columnKey;
     }
@@ -2034,39 +1529,53 @@ function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined) 
   return merged as T;
 }
 
+function mergeDefinedWithSource<T extends object>(
+  base: T,
+  patch: Partial<T> | undefined,
+  sources: ValueSourceMap,
+  source: ValueSource,
+) {
+  const merged = mergeDefined(base, patch);
+
+  if (!patch) {
+    return merged;
+  }
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      sources[key] = source;
+    }
+  }
+
+  return merged;
+}
+
 function pruneUndefined<T extends object>(value: T) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
+}
+
+function createValueSourceMap<T extends object>(value: T, source: ValueSource) {
+  return Object.fromEntries(Object.entries(value).map(([key]) => [key, source])) as ValueSourceMap;
+}
+
+function pruneUndefinedSources<T extends object>(values: T, sources: ValueSourceMap) {
+  const activeKeys = new Set(Object.keys(values));
+  const nextSources = { ...sources };
+
+  for (const key of Object.keys(nextSources)) {
+    if (!activeKeys.has(key)) {
+      delete nextSources[key];
+    }
+  }
+
+  return nextSources;
 }
 
 function listMissingRequiredColumns<TTable extends Table>(
   table: TTable,
   values: Partial<InferInsert<TTable>>,
 ) {
-  const missing: string[] = [];
-
-  for (const [columnKey, column] of Object.entries(getTableColumns(table)) as [string, Column][]) {
-    const metadata = column as Column & {
-      notNull?: boolean;
-      hasDefault?: boolean;
-      generated?: { type?: string };
-      generatedIdentity?: { type?: string };
-    };
-
-    if (
-      !metadata.notNull ||
-      metadata.hasDefault ||
-      metadata.generated?.type ||
-      metadata.generatedIdentity?.type
-    ) {
-      continue;
-    }
-
-    if (!(columnKey in values)) {
-      missing.push(columnKey);
-    }
-  }
-
-  return missing;
+  return getRequiredColumnKeys(table).filter((columnKey) => !(columnKey in values));
 }
 
 function ensureRequiredColumns<TTable extends Table>(
@@ -2082,18 +1591,59 @@ function ensureRequiredColumns<TTable extends Table>(
   }
 }
 
+function ensureSafeUniqueConstraints<TTable extends Table>(
+  table: TTable,
+  values: Partial<InferInsert<TTable>>,
+  valueSources: ValueSourceMap,
+) {
+  for (const constraint of getComplexUniqueConstraints(table)) {
+    const relatedColumnKeys = constraint.columnKeys.filter((columnKey) => columnKey in values);
+
+    if (constraint.unresolved) {
+      throw new Error(
+        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} could not be fully analyzed. Set the constrained values explicitly and confirm them with verifyCreates() against a disposable database.`,
+      );
+    }
+
+    if (relatedColumnKeys.length === 0) {
+      continue;
+    }
+
+    const autoGeneratedColumnKeys = relatedColumnKeys.filter(
+      (columnKey) => valueSources[columnKey] === "auto",
+    );
+
+    if (autoGeneratedColumnKeys.length > 0) {
+      throw new Error(
+        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} still relies on auto-generated values for: ${autoGeneratedColumnKeys.join(", ")}. Provide explicit values through columns(f), defaults(...), state(...), for(...), or call-site overrides.`,
+      );
+    }
+  }
+}
+
 function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: string[]) {
-  const columns = getTableColumns(table) as Record<string, Column>;
+  const columns = getTableColumnRecord(table);
   const hints: string[] = [];
   const compositeForeignKeyColumns = new Set(
     getForeignKeys(table)
       .filter((foreignKey) => foreignKey.localKeys.length > 1)
       .flatMap((foreignKey) => foreignKey.localKeys),
   );
+  const singleForeignKeyColumns = new Set(
+    getForeignKeys(table)
+      .filter((foreignKey) => foreignKey.localKeys.length === 1)
+      .flatMap((foreignKey) => foreignKey.localKeys),
+  );
 
   if (missing.some((columnKey) => compositeForeignKeyColumns.has(columnKey))) {
     hints.push(
-      "Composite foreign keys are not auto-created by the table-only fallback. Use explicit relation planning, existing(...), or direct overrides for the full key.",
+      "Composite foreign keys are never auto-created. Use for(...) with an existing parent row or provide direct overrides for the full key.",
+    );
+  }
+
+  if (missing.some((columnKey) => singleForeignKeyColumns.has(columnKey))) {
+    hints.push(
+      "Required foreign keys are not auto-created by plain create(). Create the parent first and pass it through for(...), or provide direct overrides.",
     );
   }
 
@@ -2109,4 +1659,71 @@ function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: st
   hints.push("Add overrides or refine the factory with state().");
 
   return hints.join(" ");
+}
+
+function describeUniqueConstraint(constraint: {
+  kind: "compound" | "expression" | "partial";
+  name: string;
+}) {
+  const kindLabel =
+    constraint.kind === "compound"
+      ? "compound unique constraint"
+      : constraint.kind === "partial"
+        ? "partial unique index"
+        : "expression-based unique index";
+
+  return `${kindLabel} "${constraint.name}"`;
+}
+
+function getTableColumnEntries(table: Table) {
+  const cached = tableColumnEntriesCache.get(table);
+
+  if (cached) {
+    return cached;
+  }
+
+  const entries = Object.entries(getTableColumns(table)) as Array<[string, Column]>;
+  tableColumnEntriesCache.set(table, entries);
+  return entries;
+}
+
+function getTableColumnRecord(table: Table) {
+  const cached = tableColumnRecordCache.get(table);
+
+  if (cached) {
+    return cached;
+  }
+
+  const record = Object.fromEntries(getTableColumnEntries(table)) as Record<string, Column>;
+  tableColumnRecordCache.set(table, record);
+  return record;
+}
+
+function getRequiredColumnKeys(table: Table) {
+  const cached = requiredColumnKeysCache.get(table);
+
+  if (cached) {
+    return cached;
+  }
+
+  const keys = getTableColumnEntries(table)
+    .filter(([, column]) => {
+      const metadata = column as Column & {
+        notNull?: boolean;
+        hasDefault?: boolean;
+        generated?: { type?: string };
+        generatedIdentity?: { type?: string };
+      };
+
+      return !(
+        !metadata.notNull ||
+        metadata.hasDefault ||
+        metadata.generated?.type ||
+        metadata.generatedIdentity?.type
+      );
+    })
+    .map(([columnKey]) => columnKey);
+
+  requiredColumnKeysCache.set(table, keys);
+  return keys;
 }

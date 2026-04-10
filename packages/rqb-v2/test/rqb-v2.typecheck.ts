@@ -1,7 +1,7 @@
 import { defineRelations } from "drizzle-orm";
 import { integer, pgTable, serial, text } from "drizzle-orm/pg-core";
 
-import { createFactories, defineFactory, existing } from "../src";
+import { createFactories, defineFactory } from "../src";
 
 const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -15,27 +15,19 @@ const posts = pgTable("posts", {
     .references(() => users.id),
 });
 
-const groups = pgTable("groups", {
+const comments = pgTable("comments", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-});
-
-const usersToGroups = pgTable("users_to_groups", {
-  userId: integer("user_id")
+  authorId: integer("author_id")
     .notNull()
     .references(() => users.id),
-  groupId: integer("group_id")
+  reviewerId: integer("reviewer_id")
     .notNull()
-    .references(() => groups.id),
+    .references(() => users.id),
 });
 
-const relations = defineRelations({ users, posts, groups, usersToGroups }, (r) => ({
+const relations = defineRelations({ comments, posts, users }, (r) => ({
   users: {
     posts: r.many.posts(),
-    groups: r.many.groups({
-      from: r.users.id.through(r.usersToGroups.userId),
-      to: r.groups.id.through(r.usersToGroups.groupId),
-    }),
   },
   posts: {
     author: r.one.users({
@@ -43,15 +35,20 @@ const relations = defineRelations({ users, posts, groups, usersToGroups }, (r) =
       to: r.users.id,
     }),
   },
-  groups: {
-    participants: r.many.users(),
+  comments: {
+    author: r.one.users({
+      from: r.comments.authorId,
+      to: r.users.id,
+    }),
+    reviewer: r.one.users({
+      from: r.comments.reviewerId,
+      to: r.users.id,
+    }),
   },
 }));
 
 const db = {} as { query: unknown };
 const userFactory = defineFactory(users);
-const groupFactory = defineFactory(groups);
-const postFactory = defineFactory(posts);
 const factories = createFactories({
   db,
   definitions: {
@@ -60,16 +57,17 @@ const factories = createFactories({
   relations,
 });
 
-factories.posts.for("author", userFactory);
-factories.users.hasMany("posts", 2, postFactory);
-factories.users.hasMany("groups", 2, groupFactory);
-factories.groups.hasMany("participants", 1, userFactory);
+const author = {} as typeof users.$inferSelect;
+const reviewer = {} as typeof users.$inferSelect;
 
-// @ts-expect-error hasMany should not accept a one relation key
-factories.posts.hasMany("author", 1);
+factories.posts.for("author", author);
+factories.comments.for("author", author).for("reviewer", reviewer);
 
 // @ts-expect-error for should not accept a many relation key
 factories.users.for("posts");
 
-// @ts-expect-error existing(...) must use the relation target table
-factories.posts.for("author", existing(groups, { id: 1, name: "core" }));
+// @ts-expect-error for(...) must use the relation target table row
+factories.posts.for("author", { id: 1, authorId: 1 });
+
+// @ts-expect-error hasMany should no longer exist on the public runtime
+factories.users.hasMany("posts", 1);

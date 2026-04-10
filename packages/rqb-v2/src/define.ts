@@ -1,6 +1,6 @@
 import type { Table } from "drizzle-orm";
 
-import { defineFactory as defineFactoryRoot } from "../../shared/src/define";
+import { defineFactory as defineFactoryRoot } from "../../../src/internal/define";
 
 import type {
   FactoryBuildHook,
@@ -10,7 +10,12 @@ import type {
   FactoryStateInput,
   FactoryTraitDefinition,
 } from "./core";
-import type { FactoryInferenceOptions } from "./types";
+import type {
+  FactoryInferenceOptions,
+  FactorySeedColumns,
+  FactorySeedColumnsInput,
+  FactorySeedFunctions,
+} from "./types";
 
 type FactoryTransient = Record<string, unknown>;
 type Hook<T> = T | T[];
@@ -19,6 +24,7 @@ type Hook<T> = T | T[];
  * Pure factory definition used to declare reusable behavior for one table.
  */
 export interface FactoryDefinition<TTable extends Table, TTransient extends FactoryTransient = {}> {
+  columns(f: FactorySeedFunctions): FactorySeedColumns<TTable>;
   defaults(overrides: FactoryOverrides<TTable>): FactoryDefinition<TTable, TTransient>;
   transient<TNextTransient extends FactoryTransient>(
     defaults: TNextTransient,
@@ -36,16 +42,7 @@ export interface FactoryDefinition<TTable extends Table, TTransient extends Fact
     overrides?: FactoryOverrides<TTable>,
     options?: FactoryCallOptions<TTransient>,
   ): Promise<import("drizzle-orm").InferInsertModel<TTable>>;
-  make(
-    overrides?: FactoryOverrides<TTable>,
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<import("drizzle-orm").InferInsertModel<TTable>>;
-  buildList(
-    count: number,
-    overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<import("drizzle-orm").InferInsertModel<TTable>[]>;
-  makeList(
+  buildMany(
     count: number,
     overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
     options?: FactoryCallOptions<TTransient>,
@@ -59,6 +56,7 @@ export interface DefineFactoryOptions<
   TTable extends Table,
   TTransient extends FactoryTransient = {},
 > {
+  columns?: FactorySeedColumnsInput<TTable>;
   inference?: FactoryInferenceOptions<TTable>;
   transient?: TTransient;
   defaults?: FactoryOverrides<TTable>;

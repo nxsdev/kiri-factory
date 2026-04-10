@@ -4,7 +4,7 @@ See also:
 
 - [Recipes](./README.md)
 - [Many-to-many patterns](../many-to-many.md)
-- [Relations and graph returns](../relations.md)
+- [Relations](../relations.md)
 
 If your through table has required payload columns, prefer the explicit junction-table factory instead of direct many-to-many helpers.
 
@@ -40,12 +40,15 @@ const factories = createFactories({
   },
 });
 
-await factories.memberships.for("member", { name: "Ada" }).for("group", { label: "Core" }).create({
+const member = await factories.members.create({ name: "Ada" });
+const group = await factories.groups.create({ label: "Core" });
+
+await factories.memberships.for("member", member).for("group", group).create({
   role: "owner",
 });
 ```
 
 ## Rule Of Thumb
 
-- through row is pure wiring: direct many-to-many helper is fine
+- through row is pure wiring: explicit junction creation is still fine
 - through row has required payload or business meaning: create the junction table directly

@@ -3,24 +3,12 @@
 See also:
 
 - [Recipes](./README.md)
-- [Relations and graph returns](../relations.md)
+- [Relations](../relations.md)
 - [Compatibility and limits](../compatibility.md)
 
 Composite foreign keys work best when you use explicit relation planning.
 
-The narrow table-only fallback only auto-creates single-column parents. If one child row depends on two or more foreign-key columns, plan the edge with `for(...)` or create the parent first and reuse it with `existing(...)`.
-
-## Child Side: Let The Relation Fill The Whole Key
-
-```ts
-const line = await factories.orderVersionLines.for("orderVersion").create({
-  sku: "SKU-1",
-});
-```
-
-When the relation metadata knows both owned keys, `for("orderVersion")` copies the full composite key from the created parent row.
-
-## Reuse An Existing Composite Parent
+## Let The Relation Fill The Whole Key
 
 ```ts
 const version = await factories.orderVersions.create({
@@ -28,33 +16,22 @@ const version = await factories.orderVersions.create({
   version: 3,
 });
 
-await factories.orderVersionLines.for("orderVersion", existing(orderVersions, version)).create({
-  sku: "SKU-2",
+const line = await factories.orderVersionLines.for("orderVersion", version).create({
+  sku: "SKU-1",
 });
 ```
 
-This is usually the clearest option when your test already has one meaningful parent row.
+When relation metadata knows every owned key, `for("orderVersion", version)` copies the full composite key from the parent row.
 
-## Parent Side
-
-```ts
-const graph = await factories.orderVersions.hasMany("lines", 2).createGraph({
-  orderId: 100,
-  version: 3,
-});
-```
-
-Parent-side planning also works because the relation owns the full set of keys.
-
-## When To Avoid Table-Only Fallback
+## When To Avoid Plain `create()`
 
 ```ts
 const factories = createFactories({
   db,
-  tables: { orderVersions, orderVersionLines },
+  schema: { orderVersions, orderVersionLines },
 });
 
 await factories.orderVersionLines.create();
 ```
 
-This style is intentionally too weak for composite foreign keys. Use relation-aware runtimes or explicit overrides instead.
+This style is intentionally too weak for composite foreign keys. Use an explicit parent row or override the full key directly instead.

@@ -1,18 +1,13 @@
 export {
   FACTORY_INSTANCE,
-  existing,
-  fromSchema,
   fromTable,
   type AutoFactory,
-  type ExistingRow,
   type FactoryBuildHook,
   type FactoryCallOptions,
   type FactoryCreateHook,
-  type FactoryGraphNode,
   type FactoryOverrides,
   type FactoryStateContext,
   type FactoryStateInput,
   type FactoryTrait,
   type FactoryTraitDefinition,
-  type SchemaFactories,
-} from "../../shared/src/core";
+} from "./internal/core";

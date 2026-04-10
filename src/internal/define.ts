@@ -11,7 +11,12 @@ import {
   type FactoryStateInput,
   type FactoryTraitDefinition,
 } from "./core";
-import type { FactoryInferenceOptions } from "./types";
+import type {
+  FactoryInferenceOptions,
+  FactorySeedColumns,
+  FactorySeedColumnsInput,
+  FactorySeedFunctions,
+} from "./types";
 
 type FactoryTransient = Record<string, unknown>;
 type Hook<T> = T | T[];
@@ -24,6 +29,13 @@ type Hook<T> = T | T[];
  */
 export interface FactoryDefinition<TTable extends Table, TTransient extends FactoryTransient = {}> {
   readonly [FACTORY_INSTANCE]: true;
+  /**
+   * Returns the shared drizzle-seed column generators for this definition.
+   *
+   * The callback argument matches the official `seed(...).refine((f) => ...)`
+   * API from `drizzle-seed`.
+   */
+  columns(f: FactorySeedFunctions): FactorySeedColumns<TTable>;
   /**
    * Sets default values for this definition.
    */
@@ -69,24 +81,9 @@ export interface FactoryDefinition<TTable extends Table, TTransient extends Fact
     options?: FactoryCallOptions<TTransient>,
   ): Promise<import("drizzle-orm").InferInsertModel<TTable>>;
   /**
-   * Alias for `build()`.
-   */
-  make(
-    overrides?: FactoryOverrides<TTable>,
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<import("drizzle-orm").InferInsertModel<TTable>>;
-  /**
    * Builds many rows in memory.
    */
-  buildList(
-    count: number,
-    overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
-    options?: FactoryCallOptions<TTransient>,
-  ): Promise<import("drizzle-orm").InferInsertModel<TTable>[]>;
-  /**
-   * Alias for `buildList()`.
-   */
-  makeList(
+  buildMany(
     count: number,
     overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
     options?: FactoryCallOptions<TTransient>,
@@ -100,6 +97,11 @@ export interface DefineFactoryOptions<
   TTable extends Table,
   TTransient extends FactoryTransient = {},
 > {
+  /**
+   * Shared drizzle-seed column generators used by both runtime factories and
+   * `seed(...).refine((f) => ...)`.
+   */
+  columns?: FactorySeedColumnsInput<TTable>;
   /**
    * Advanced schema inference controls for this table.
    */
@@ -145,9 +147,11 @@ export function defineFactory<TTable extends Table, TTransient extends FactoryTr
   table: TTable,
   options: DefineFactoryOptions<TTable, TTransient> = {},
 ): FactoryDefinition<TTable, TTransient> {
-  let factory = (options.inference
-    ? fromTable(table, { inference: options.inference })
-    : fromTable(table)) as unknown as AutoFactory<TTable, TTransient>;
+  const fromTableOptions = {
+    ...(options.columns ? { columns: options.columns } : {}),
+    ...(options.inference ? { inference: options.inference } : {}),
+  };
+  let factory = fromTable(table, fromTableOptions) as unknown as AutoFactory<TTable, TTransient>;
 
   if (options.transient) {
     factory = factory.transient(options.transient);

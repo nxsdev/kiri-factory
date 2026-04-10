@@ -1,4 +1,4 @@
-# Relations and Graph Returns
+# Relations
 
 See also:
 
@@ -7,118 +7,101 @@ See also:
 - [Many-to-many patterns](./many-to-many.md)
 - [Compatibility and limits](./compatibility.md)
 
-## Relation Planning APIs
+## `for(...)`
 
-`kiri-factory` uses three relation-planning methods.
+`for(...)` is the main relation helper.
 
-### `for(...)`
-
-Use `for(...)` on the child side of a relation.
+Use it on the child side of a relation.
 
 ```ts
-await factories.posts.for("author").create();
-await factories.sessions.for("user").create();
+const author = await factories.users.create();
+
+const post = await factories.posts.for("author", author).create();
+const session = await factories.sessions.for("user", author).create();
 ```
 
-### `hasOne(...)`
-
-Use `hasOne(...)` on the parent side of an inverse 1:1 relation.
-
-```ts
-await factories.users.hasOne("profile").create();
-```
-
-### `hasMany(...)`
-
-Use `hasMany(...)` on the parent side of a to-many relation.
-
-```ts
-await factories.users.hasMany("posts", 2).create();
-```
-
-## Return Values
-
-`create()` returns the root row for the table you called.
+If you omit the second argument, `kiri-factory` creates the parent row for you.
 
 ```ts
 const post = await factories.posts.for("author").create();
 ```
 
-`createList(count)` returns an array of root rows.
+## Return Values
+
+`create()` returns the row for the table you called.
 
 ```ts
-const posts = await factories.posts.createList(3);
+const post = await factories.posts.for("author").create();
 ```
 
-`createGraph()` returns the root row plus only the relations you planned explicitly with `for(...)`, `hasOne(...)`, or `hasMany(...)`.
+`createMany(count)` returns an array of rows for that table.
 
 ```ts
-const graph = await factories.users
-  .hasMany("posts", 2, (index) => ({
-    title: `Post ${index + 1}`,
-  }))
-  .createGraph();
-
-graph.row.id;
-graph.relations.posts?.[0]?.row.title;
+const posts = await factories.posts.for("author").createMany(3);
 ```
 
-Important:
-
-- implicit FK auto-create can still run when needed
-- implicit fallback does not appear in graph results
-- graph nodes can be either `source: "created"` or `source: "existing"`
-
-## Reusing Existing Rows
-
-Use `existing(table, row)` when a planned relation should reuse a previously created row.
-
-```ts
-import { existing } from "kiri-factory";
-
-const author = await factories.users.create();
-
-await factories.posts.for("author", existing(users, author)).create();
-```
+This is intentional. The library helps you connect rows, but it does not change the shape of the returned row into a nested relation object.
 
 ## Same-Target Relations
 
 When one table has multiple relations to the same target table, always use the Drizzle relation key.
 
 ```ts
-await factories.comments.for("author").create();
-await factories.comments.for("reviewer").create();
+const author = await factories.users.create();
+const reviewer = await factories.users.create();
+
+const comment = await factories.reviewComments
+  .for("author", author)
+  .for("reviewer", reviewer)
+  .create();
 ```
 
 ## Self Relations
 
-Self relations work as long as the chain can terminate.
+Self relations work the same way.
 
 ```ts
-await factories.employees.for("manager").create();
-await factories.employees.hasMany("reports", 2).createGraph();
-```
-
-## FK Auto-Create Fallback
-
-Table-only runtimes can still create simple parents from foreign-key metadata.
-
-```ts
-const factories = createFactories({
-  db,
-  tables: { users, posts },
+const manager = await factories.employees.create({
+  name: "Boss",
 });
 
-const post = await factories.posts.create();
+const employee = await factories.employees.for("manager", manager).create({
+  name: "Worker",
+});
 ```
 
-This mode is intentionally narrow:
+## Step-by-Step Trees
 
-- only for simple foreign keys that can be read safely
-- composite foreign keys are intentionally excluded from this fallback
-- use explicit relation planning when a parent key spans multiple columns
-- mainly a fallback
-- not the main graph API
+For deeper trees, keep the setup explicit.
+
+```ts
+const user = await factories.users.create();
+const profile = await factories.profiles.for("user", user).create();
+const posts = await factories.posts.for("profile", profile).createMany(2);
+
+const commentsByPost = await Promise.all(
+  posts.map((post) => factories.comments.for("post", post).createMany(3)),
+);
+
+const comments = commentsByPost.flat();
+```
+
+This usually has lower cognitive cost than a deep nested DSL.
+
+## Plain `create()` Does Not Auto-Create Parents
+
+`create()` does not invent missing parent rows for you.
+
+```ts
+const author = await factories.users.create();
+const post = await factories.posts.for("author", author).create();
+```
+
+This is intentional:
+
+- ownership and tenancy stay explicit in tests
+- the row you create is the row you asked for
+- missing foreign keys fail fast instead of silently creating unrelated parents
 
 If you are working on many-to-many specifically, continue with [Many-to-many patterns](./many-to-many.md).  
 If you want support boundaries before using a pattern in production tests, continue with [Compatibility and limits](./compatibility.md).

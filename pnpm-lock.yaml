@@ -9,6 +9,9 @@ catalogs:
     '@electric-sql/pglite':
       specifier: ^0.4.4
       version: 0.4.4
+    drizzle-seed:
+      specifier: ^0.3.1
+      version: 0.3.1
     typescript:
       specifier: ^6.0.2
       version: 6.0.2
@@ -27,21 +30,10 @@ catalogs:
 importers:
 
   .:
-    devDependencies:
-      '@electric-sql/pglite':
+    dependencies:
+      drizzle-seed:
         specifier: 'catalog:'
-        version: 0.4.4
-      drizzle-orm:
-        specifier: catalog:rqb-v1
-        version: 0.45.2(@electric-sql/pglite@0.4.4)
-      typescript:
-        specifier: 'catalog:'
-        version: 6.0.2
-      vite-plus:
-        specifier: 'catalog:'
-        version: 0.1.16(@types/node@25.6.0)(typescript@6.0.2)(vite@8.0.8(@types/node@25.6.0))
-
-  packages/rqb-v1:
+        version: 0.3.1(drizzle-orm@0.45.2(@electric-sql/pglite@0.4.4))
     devDependencies:
       '@electric-sql/pglite':
         specifier: 'catalog:'
@@ -70,8 +62,6 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 0.1.16(@types/node@25.6.0)(typescript@6.0.2)(vite@8.0.8(@types/node@25.6.0))
-
-  packages/shared: {}
 
 packages:
 
@@ -955,6 +945,14 @@ packages:
       zod:
         optional: true
 
+  drizzle-seed@0.3.1:
+    resolution: {integrity: sha512-F/0lgvfOAsqlYoHM/QAGut4xXIOXoE5VoAdv2FIl7DpGYVXlAzKuJO+IphkKUFK3Dz+rFlOsQLnMNrvoQ0cx7g==}
+    peerDependencies:
+      drizzle-orm: '>=0.36.4'
+    peerDependenciesMeta:
+      drizzle-orm:
+        optional: true
+
   ecdsa-sig-formatter@1.0.11:
     resolution: {integrity: sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==}
 
@@ -1191,6 +1189,9 @@ packages:
   process@0.11.10:
     resolution: {integrity: sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==}
     engines: {node: '>= 0.6.0'}
+
+  pure-rand@6.1.0:
+    resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
   readable-stream@4.7.0:
     resolution: {integrity: sha512-oIGGmcpTLwPga8Bn6/Z75SVaH1z5dUut2ibSyAMVhmUggWpmDn2dapB0n7f8nwaSiRtepAsfJyfXIO5DCVAODg==}
@@ -1881,6 +1882,12 @@ snapshots:
     optionalDependencies:
       '@electric-sql/pglite': 0.4.4
 
+  drizzle-seed@0.3.1(drizzle-orm@0.45.2(@electric-sql/pglite@0.4.4)):
+    dependencies:
+      pure-rand: 6.1.0
+    optionalDependencies:
+      drizzle-orm: 0.45.2(@electric-sql/pglite@0.4.4)
+
   ecdsa-sig-formatter@1.0.11:
     dependencies:
       safe-buffer: 5.2.1
@@ -2125,6 +2132,8 @@ snapshots:
       source-map-js: 1.2.1
 
   process@0.11.10: {}
+
+  pure-rand@6.1.0: {}
 
   readable-stream@4.7.0:
     dependencies:

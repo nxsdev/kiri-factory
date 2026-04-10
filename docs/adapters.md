@@ -1,4 +1,4 @@
-# Adapters, Dialects, and Runtime Behavior
+# Adapters and Transactions
 
 See also:
 
@@ -21,7 +21,7 @@ That means:
 ```ts
 const factories = createFactories({
   db,
-  tables: { users },
+  schema: { users },
   adapter: {
     async create({ values }) {
       return values as typeof values & { id: number };
@@ -40,9 +40,9 @@ For real drivers without `returning()`, the usual pattern is:
 
 Tested in this repository:
 
-- PostgreSQL tables with PGlite, including nested graph returns
-- MySQL tables with a custom adapter for relation planning flows
-- SQLite tables with a custom adapter for has-one flows, graph returns, and simple `CHECK` parsing
+- PostgreSQL tables with PGlite
+- MySQL tables with a custom adapter
+- SQLite tables with a custom adapter and simple `CHECK` parsing
 
 Important distinction:
 
@@ -64,13 +64,31 @@ This is useful for catching factories that still need explicit build-time overri
 - adapter-specific persistence failures are out of scope
 - create-time database errors are out of scope
 
-## Graph Writes Are Not Transactional By Default
+## `verifyCreates()`
 
-`createGraph()` and `createGraphList()` are not wrapped in a transaction automatically.
+If you want a stronger validation pass, ask the runtime to try two real `create()` calls per factory:
 
-If a nested create fails midway, earlier rows may already be persisted.
+```ts
+const issues = await factories.verifyCreates();
+```
 
-If your tests need atomic graph creation, wrap factory calls in your own transaction strategy.
+Use this with a disposable database or transaction boundary.
+
+`verifyCreates()` is useful for catching:
+
+- adapter-specific persistence failures
+- missing explicit parents after disabling implicit FK auto-create
+- create-time constraint errors that `build()` cannot see
+- simple sequence and unique issues that only show up after more than one insert
+- duplicate explicit values on unique columns
+- non-trivial unique/index cases that still need disposable-DB confirmation
+
+## Transactions
+
+`create()` and `createMany()` are not wrapped in a transaction automatically.
+
+If your setup needs atomicity, wrap the sequence in your own transaction boundary.  
+See [Wrapping factory setup in a transaction](./recipes/transactions.md).
 
 If you need to understand what values are inferred before persistence, continue with [Inference and `CHECK` support](./inference.md).  
 If you want the supported feature matrix, continue with [Compatibility and limits](./compatibility.md).

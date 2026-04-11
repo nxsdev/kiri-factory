@@ -6,7 +6,7 @@ Schema-driven factories for explicit Drizzle ORM test setup.
 
 - shared required-column values live in one factory definition
 - `for("relation", row)` wires foreign keys by relation name
-- `create()` / `createMany()` can auto-create one missing single-column parent when unambiguous
+- `create()` / `createMany()` can auto-create missing single-column parents from runtime tables
 - `create()` still returns the row for the table you asked for
 
 ## Quick Example

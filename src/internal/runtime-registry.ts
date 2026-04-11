@@ -110,8 +110,7 @@ export function attachRegistryHelpers<TTables extends TableMap>(
 
       for (const [key, value] of Object.entries(registry)) {
         try {
-          await value.create();
-          await value.create();
+          await value.createMany(2);
         } catch (error) {
           const table = tables[key as keyof TTables];
 

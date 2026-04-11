@@ -61,6 +61,18 @@ const sessions = pgTable("sessions", {
   token: varchar("token", { length: 24 }).notNull(),
 });
 
+const profiles = pgTable(
+  "profiles",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    bio: text("bio").notNull(),
+  },
+  (table) => [unique("profiles_user_id_unique").on(table.userId)],
+);
+
 const reviewComments = pgTable("review_comments", {
   id: serial("id").primaryKey(),
   authorId: integer("author_id")
@@ -86,6 +98,16 @@ const members = pgTable("members", {
 const groups = pgTable("groups", {
   id: serial("id").primaryKey(),
   label: text("label").notNull(),
+});
+
+const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+});
+
+const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
 });
 
 const memberships = pgTable("memberships", {
@@ -156,6 +178,36 @@ const scoredSessions = pgTable(
     check("scored_sessions_status_check", sql`${table.status} in ('draft', 'published')`),
   ],
 );
+
+const managedUsers = pgTable("managed_users", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .notNull()
+    .references(() => tenants.id),
+  roleId: integer("role_id")
+    .notNull()
+    .references(() => roles.id),
+  email: text("email").notNull(),
+});
+
+const managedSessions = pgTable("managed_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => managedUsers.id),
+  token: varchar("token", { length: 24 }).notNull(),
+});
+
+const tenantArticleLinks = pgTable("tenant_article_links", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .notNull()
+    .references(() => tenants.id),
+  articleId: integer("article_id")
+    .notNull()
+    .references(() => constrainedArticles.id),
+  note: text("note").notNull(),
+});
 
 const pairedScores = pgTable(
   "paired_scores",
@@ -299,18 +351,24 @@ const schema = {
   memberships,
   membershipsRelations,
   members,
+  managedSessions,
+  managedUsers,
   orderVersionLines,
   orderVersionLinesRelations,
   orderVersions,
   pairedScores,
   posts,
   postsRelations,
+  profiles,
   reviewComments,
   reviewCommentsRelations,
+  roles,
   scoredSessions,
   seededCustomers,
   sessions,
   sessionsRelations,
+  tenantArticleLinks,
+  tenants,
   userRole,
   users,
   usersRelations,
@@ -420,20 +478,33 @@ describe("kiri-factory stable runtime", () => {
     expect(await db.select().from(users)).toHaveLength(0);
   });
 
-  it("verifies create-time issues across the runtime when parent selection is ambiguous", async () => {
+  it("auto-creates same-target required parents through separate local keys", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
       db,
       schema: { reviewComments, users },
     });
 
+    const comment = await factories.reviewComments.create({
+      body: "Two implicit parents",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(persistedUsers).toHaveLength(2);
+    expect(comment.authorId).not.toBe(comment.reviewerId);
+  });
+
+  it("verifyCreates() catches createMany-only failures under shared auto-parents", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { profiles, users },
+    });
+
     const issues = await factories.verifyCreates();
 
     expect(issues).toHaveLength(1);
-    expect(issues[0]?.key).toBe("reviewComments");
-    expect(issues[0]?.error.message).toMatch(
-      /only auto-create one missing single-column foreign key at a time/i,
-    );
+    expect(issues[0]?.key).toBe("profiles");
   });
 
   it("creates belongs-to parents through for(...)", async () => {
@@ -513,6 +584,64 @@ describe("kiri-factory stable runtime", () => {
     expect(comment.authorId).toBe(author.id);
     expect(comment.reviewerId).not.toBe(author.id);
     expect(persistedUsers).toHaveLength(2);
+  });
+
+  it("shares auto-created same-target parents across createMany()", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { reviewComments, users },
+    });
+
+    const comments = await factories.reviewComments.createMany(2, (index) => ({
+      body: `Shared implicit parents ${index + 1}`,
+    }));
+    const persistedUsers = await db.select().from(users);
+
+    expect(comments).toHaveLength(2);
+    expect(persistedUsers).toHaveLength(2);
+    expect(new Set(comments.map((comment) => comment.authorId))).toHaveLength(1);
+    expect(new Set(comments.map((comment) => comment.reviewerId))).toHaveLength(1);
+    expect(comments[0]?.authorId).not.toBe(comments[0]?.reviewerId);
+  });
+
+  it("auto-creates multi-hop parent chains across several tables", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { managedSessions, managedUsers, roles, tenants },
+    });
+
+    const sessions = await factories.managedSessions.createMany(2, (index) => ({
+      token: `managed-${index + 1}`,
+    }));
+    const persistedManagedUsers = await db.select().from(managedUsers);
+    const persistedTenants = await db.select().from(tenants);
+    const persistedRoles = await db.select().from(roles);
+
+    expect(sessions).toHaveLength(2);
+    expect(persistedManagedUsers).toHaveLength(1);
+    expect(persistedTenants).toHaveLength(1);
+    expect(persistedRoles).toHaveLength(1);
+    expect(new Set(sessions.map((session) => session.userId))).toEqual(
+      new Set([persistedManagedUsers[0]?.id]),
+    );
+  });
+
+  it("does not persist earlier sibling parents when a later parent fails validation", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { constrainedArticles, tenantArticleLinks, tenants },
+    });
+
+    await expect(
+      factories.tenantArticleLinks.create({
+        note: "should fail before inserts",
+      }),
+    ).rejects.toThrow(/does not satisfy a simple CHECK constraint/i);
+    expect(await db.select().from(tenants)).toHaveLength(0);
+    expect(await db.select().from(constrainedArticles)).toHaveLength(0);
   });
 
   it("supports self relations through for(...)", async () => {
@@ -891,6 +1020,13 @@ async function createTestDb() {
       token varchar(24) not null
     );
 
+    create table profiles (
+      id serial primary key,
+      user_id integer not null references users(id),
+      bio text not null,
+      constraint profiles_user_id_unique unique (user_id)
+    );
+
     create table review_comments (
       id serial primary key,
       author_id integer not null references users(id),
@@ -912,6 +1048,16 @@ async function createTestDb() {
     create table groups (
       id serial primary key,
       label text not null
+    );
+
+    create table tenants (
+      id serial primary key,
+      name text not null
+    );
+
+    create table roles (
+      id serial primary key,
+      code text not null
     );
 
     create table memberships (
@@ -951,6 +1097,26 @@ async function createTestDb() {
       status text not null,
       constraint scored_sessions_rating_check check (rating >= 3 and rating <= 5),
       constraint scored_sessions_status_check check (status in ('draft', 'published'))
+    );
+
+    create table managed_users (
+      id serial primary key,
+      tenant_id integer not null references tenants(id),
+      role_id integer not null references roles(id),
+      email text not null
+    );
+
+    create table managed_sessions (
+      id serial primary key,
+      user_id integer not null references managed_users(id),
+      token varchar(24) not null
+    );
+
+    create table tenant_article_links (
+      id serial primary key,
+      tenant_id integer not null references tenants(id),
+      article_id integer not null references constrained_articles(id),
+      note text not null
     );
 
     create table paired_scores (

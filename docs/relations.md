@@ -26,12 +26,11 @@ Both arguments are required:
 
 This keeps ownership, tenancy, and reused parents explicit.
 
-## Implicit Single-Parent Convenience
+## Implicit Parent Convenience
 
-`create()` and `createMany()` can auto-create one missing single-column parent.
+`create()` and `createMany()` can auto-create missing single-column parents.
 
-This only happens when exactly one required single-column foreign key is still
-missing after applying:
+This happens after applying:
 
 - inferred values
 - `columns(f)`
@@ -44,6 +43,10 @@ const session = await factories.sessions.create();
 
 If `sessions.userId` is the only missing required single-column parent key,
 `kiri-factory` creates one `user` row first and then creates the `session`.
+
+The same rule extends across several required belongs-to edges.
+If `users` still needs `tenantId` and `roleId`, those parent rows can also be
+auto-created as long as their tables are part of the runtime.
 
 ```ts
 const sessions = await factories.sessions.createMany(3);
@@ -132,9 +135,8 @@ const comment = await factories.reviewComments
   .create();
 ```
 
-Plain `create()` does not guess between multiple missing required parents.
-If more than one single-column foreign key is still missing, keep the relation
-explicit with `for(...)` or direct overrides.
+When you want a specific existing or shared parent, keep it explicit with
+`for(...)` or direct overrides.
 
 ## Self Relations
 
@@ -227,7 +229,7 @@ This usually has lower cognitive cost than a deep nested DSL.
 Implicit parent creation is intentionally narrow.
 
 - one missing single-column parent: auto-create it
-- more than one missing single-column parent: require `for(...)` or overrides
+- multiple missing single-column parents: auto-create each available parent table
 - composite foreign keys: require `for(...)` or overrides
 - many-to-many through rows: create them explicitly
 

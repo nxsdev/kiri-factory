@@ -110,6 +110,7 @@ type AutoParentRow = Record<string, unknown>;
 type AutoParentCache = Map<Table, Map<string, AutoParentRow>>;
 type CreateExecution = {
   autoParents: AutoParentCache;
+  materializeAutoParents: boolean;
   path: Table[];
 };
 type SingleColumnForeignKey = {
@@ -241,6 +242,7 @@ export class AutoFactory<TTable extends Table> {
       results.push(
         await this.#createInternal(resolveListOverrides(overrides, index), {
           autoParents,
+          materializeAutoParents: true,
           path: [],
         }),
       );
@@ -322,7 +324,12 @@ export class AutoFactory<TTable extends Table> {
       this.#state.runtime?.inference,
     );
 
-    if (strategy === "create" && execution && pendingAutoParents.length > 0) {
+    if (
+      strategy === "create" &&
+      execution &&
+      execution.materializeAutoParents &&
+      pendingAutoParents.length > 0
+    ) {
       ({ valueSources, values } = await this.#materializeAutoParents(
         values,
         valueSources,
@@ -392,9 +399,9 @@ export class AutoFactory<TTable extends Table> {
       };
     }
 
-    const candidate = getAutoParentCandidate(this.#state.table, values);
+    const candidates = getAutoParentCandidates(this.#state.table, values);
 
-    if (!candidate) {
+    if (candidates.length === 0) {
       return {
         pendingAutoParents: [] as PendingAutoParent[],
         valueSources,
@@ -404,46 +411,43 @@ export class AutoFactory<TTable extends Table> {
 
     const resolved = { ...values };
     const nextSources = { ...valueSources };
-    const cachedParent = execution.autoParents.get(this.#state.table)?.get(candidate.localKey);
+    const pendingAutoParents: PendingAutoParent[] = [];
 
-    if (cachedParent) {
-      (resolved as Record<string, unknown>)[candidate.localKey] =
-        cachedParent[candidate.foreignKey];
-      nextSources[candidate.localKey] = "relation";
-      return {
-        pendingAutoParents: [] as PendingAutoParent[],
-        valueSources: nextSources,
-        values: resolved,
-      };
-    }
+    for (const candidate of candidates) {
+      const cachedParent = execution.autoParents.get(this.#state.table)?.get(candidate.localKey);
 
-    const parentFactory = this.#state.runtime.registry.get(candidate.foreignTable);
+      if (cachedParent) {
+        (resolved as Record<string, unknown>)[candidate.localKey] =
+          cachedParent[candidate.foreignKey];
+        nextSources[candidate.localKey] = "relation";
+        continue;
+      }
 
-    if (!parentFactory) {
-      return {
-        pendingAutoParents: [] as PendingAutoParent[],
-        valueSources,
-        values,
-      };
-    }
+      const parentFactory = this.#state.runtime.registry.get(candidate.foreignTable);
 
-    if (execution.path.includes(candidate.foreignTable)) {
-      throw new Error(
-        `Could not auto-create "${tableNameOf(candidate.foreignTable)}" for "${tableNameOf(this.#state.table)}" because the foreign-key chain is cyclic. Add explicit overrides, columns(f), or for(...).`,
+      if (!parentFactory) {
+        continue;
+      }
+
+      if (execution.path.includes(candidate.foreignTable)) {
+        throw new Error(
+          `Could not auto-create "${tableNameOf(candidate.foreignTable)}" for "${tableNameOf(this.#state.table)}" because the foreign-key chain is cyclic. Add explicit overrides, columns(f), or for(...).`,
+        );
+      }
+
+      (resolved as Record<string, unknown>)[candidate.localKey] = createAutoParentPlaceholder(
+        this.#state.table,
+        candidate.localKey,
+        sequence,
+        this.#state.inference,
+        this.#state.runtime?.inference,
       );
+      nextSources[candidate.localKey] = "relation";
+      pendingAutoParents.push(candidate);
     }
-
-    (resolved as Record<string, unknown>)[candidate.localKey] = createAutoParentPlaceholder(
-      this.#state.table,
-      candidate.localKey,
-      sequence,
-      this.#state.inference,
-      this.#state.runtime?.inference,
-    );
-    nextSources[candidate.localKey] = "relation";
 
     return {
-      pendingAutoParents: [candidate],
+      pendingAutoParents,
       valueSources: nextSources,
       values: resolved,
     };
@@ -457,6 +461,30 @@ export class AutoFactory<TTable extends Table> {
   ) {
     if (!this.#state.runtime?.registry || pendingAutoParents.length === 0) {
       return { valueSources, values };
+    }
+
+    for (const candidate of pendingAutoParents) {
+      const cachedParent = execution.autoParents.get(this.#state.table)?.get(candidate.localKey);
+
+      if (cachedParent) {
+        continue;
+      }
+
+      const parentFactory = this.#state.runtime.registry.get(candidate.foreignTable);
+
+      if (!parentFactory) {
+        continue;
+      }
+
+      await parentFactory.#resolve(
+        "create",
+        {},
+        {
+          autoParents: execution.autoParents,
+          materializeAutoParents: false,
+          path: [...execution.path, this.#state.table],
+        },
+      );
     }
 
     const resolved = { ...values };
@@ -482,6 +510,7 @@ export class AutoFactory<TTable extends Table> {
         {},
         {
           autoParents: execution.autoParents,
+          materializeAutoParents: true,
           path: [...execution.path, this.#state.table],
         },
       )) as AutoParentRow;
@@ -602,9 +631,11 @@ function resolveListOverrides<TTable extends Table>(
 
 function createCreateExecution(
   autoParents: AutoParentCache = new Map<Table, Map<string, AutoParentRow>>(),
+  options: { materializeAutoParents?: boolean } = {},
 ): CreateExecution {
   return {
     autoParents,
+    materializeAutoParents: options.materializeAutoParents ?? true,
     path: [],
   };
 }
@@ -703,16 +734,12 @@ function getSingleColumnForeignKeys(table: Table) {
     })) satisfies SingleColumnForeignKey[];
 }
 
-function getAutoParentCandidate<TTable extends Table>(
+function getAutoParentCandidates<TTable extends Table>(
   table: TTable,
   values: Partial<InferInsert<TTable>>,
 ) {
   const missing = new Set(listMissingRequiredColumns(table, values));
-  const candidates = getSingleColumnForeignKeys(table).filter((foreignKey) =>
-    missing.has(foreignKey.localKey),
-  );
-
-  return candidates.length === 1 ? candidates[0]! : undefined;
+  return getSingleColumnForeignKeys(table).filter((foreignKey) => missing.has(foreignKey.localKey));
 }
 
 function createAutoParentPlaceholder<TTable extends Table>(
@@ -1400,13 +1427,9 @@ function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: st
     );
   }
 
-  if (missingSingleForeignKeys.length > 1) {
+  if (missingSingleForeignKeys.length > 0) {
     hints.push(
-      "Plain create()/createMany() only auto-create one missing single-column foreign key at a time. Use for(...) or direct overrides for the other required parents.",
-    );
-  } else if (missingSingleForeignKeys.length === 1) {
-    hints.push(
-      "Single-column foreign keys are only auto-created during create()/createMany() when exactly one required edge is still missing. Use for(...) or direct overrides for build() or ambiguous cases.",
+      "Single-column foreign keys can be auto-created during create()/createMany() when their parent tables are available in the runtime. Use for(...) or direct overrides for build(), cycles, or unresolved parents.",
     );
   }
 

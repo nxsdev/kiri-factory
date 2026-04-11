@@ -94,7 +94,7 @@ This is useful for catching factories that still need explicit build-time overri
 
 ## `verifyCreates()`
 
-If you want a stronger validation pass, ask the runtime to try two real `create()` calls per factory:
+If you want a stronger validation pass, ask the runtime to try a real `createMany(2)` per factory:
 
 ```ts
 const issues = await factories.verifyCreates();
@@ -105,7 +105,7 @@ Use this with a disposable database or transaction boundary.
 `verifyCreates()` is useful for catching:
 
 - adapter-specific persistence failures
-- unresolved or ambiguous parents that plain `create()` cannot auto-create
+- unresolved parents that plain `create()` cannot auto-create
 - create-time constraint errors that `build()` cannot see
 - simple sequence and unique issues that only show up after more than one insert
 - duplicate explicit values on unique columns

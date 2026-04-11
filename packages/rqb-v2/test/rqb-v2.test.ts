@@ -165,15 +165,17 @@ describe("kiri-factory rqb-v2 runtime", () => {
     );
   });
 
-  it("keeps ambiguous required parents explicit", async () => {
+  it("auto-creates same-target required parents through separate local keys", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });
 
-    await expect(
-      factories.reviewComments.create({
-        body: "Ambiguous users",
-      }),
-    ).rejects.toThrow(/only auto-create one missing single-column foreign key at a time/i);
+    const comment = await factories.reviewComments.create({
+      body: "Implicit same-target parents",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(persistedUsers).toHaveLength(2);
+    expect(comment.authorId).not.toBe(comment.reviewerId);
   });
 
   it("creates belongs-to parents through for(...)", async () => {

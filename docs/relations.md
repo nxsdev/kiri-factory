@@ -26,6 +26,36 @@ Both arguments are required:
 
 This keeps ownership, tenancy, and reused parents explicit.
 
+## Implicit Single-Parent Convenience
+
+`create()` and `createMany()` can auto-create one missing single-column parent.
+
+This only happens when exactly one required single-column foreign key is still
+missing after applying:
+
+- inferred values
+- `columns(f)`
+- call-site overrides
+- explicit `for(...)` plans
+
+```ts
+const session = await factories.sessions.create();
+```
+
+If `sessions.userId` is the only missing required single-column parent key,
+`kiri-factory` creates one `user` row first and then creates the `session`.
+
+```ts
+const sessions = await factories.sessions.createMany(3);
+```
+
+Within one `createMany(...)` call, that auto-created parent is shared:
+
+- one fresh `user`
+- three `session` rows
+
+Separate `create()` calls still create separate fresh parents.
+
 ## Reusing One Parent Row
 
 If several rows should belong to the same parent, create the parent once and keep
@@ -101,6 +131,10 @@ const comment = await factories.reviewComments
   .for("reviewer", reviewer)
   .create();
 ```
+
+Plain `create()` does not guess between multiple missing required parents.
+If more than one single-column foreign key is still missing, keep the relation
+explicit with `for(...)` or direct overrides.
 
 ## Self Relations
 
@@ -188,19 +222,13 @@ const comments = commentsByPost.flat();
 
 This usually has lower cognitive cost than a deep nested DSL.
 
-## Plain `create()` Does Not Auto-Create Parents
+## Plain `create()` Boundaries
 
-`create()` does not invent missing parent rows for you.
+Implicit parent creation is intentionally narrow.
 
-```ts
-const author = await factories.users.create();
-const post = await factories.posts.for("author", author).create();
-```
-
-This is intentional:
-
-- ownership and tenancy stay explicit in tests
-- the row you create is the row you asked for
-- missing foreign keys fail fast instead of silently creating unrelated parents
+- one missing single-column parent: auto-create it
+- more than one missing single-column parent: require `for(...)` or overrides
+- composite foreign keys: require `for(...)` or overrides
+- many-to-many through rows: create them explicitly
 
 If you want support boundaries before using a pattern in production tests, continue with [Compatibility and limits](./compatibility.md).

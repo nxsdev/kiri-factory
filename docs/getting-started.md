@@ -59,8 +59,9 @@ The mental model stays small:
 - `build()` / `buildMany()` for in-memory rows
 - `create()` / `createMany()` for persisted rows
 - `for(...)` for parent wiring
+- one missing single-column parent can be auto-created during `create()` / `createMany()`
 
-If your schema object includes tables but no relation exports yet, `create()` still works for rows whose required fields can be satisfied directly.  
+If your schema object includes tables but no relation exports yet, `create()` still works for rows whose required fields can be satisfied directly or by auto-creating one missing single-column parent.  
 `for(...)` only becomes available when the schema also exports relation metadata. Without relations metadata, pass foreign keys directly in the child row overrides.
 
 This row-first pattern maps well to common auth schemas:

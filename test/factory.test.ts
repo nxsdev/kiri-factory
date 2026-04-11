@@ -141,6 +141,22 @@ const constrainedArticles = pgTable(
   ],
 );
 
+const scoredSessions = pgTable(
+  "scored_sessions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    rating: integer("rating").notNull(),
+    status: text("status").notNull(),
+  },
+  (table) => [
+    check("scored_sessions_rating_check", sql`${table.rating} between 3 and 5`),
+    check("scored_sessions_status_check", sql`${table.status} in ('draft', 'published')`),
+  ],
+);
+
 const pairedScores = pgTable(
   "paired_scores",
   {
@@ -291,6 +307,7 @@ const schema = {
   postsRelations,
   reviewComments,
   reviewCommentsRelations,
+  scoredSessions,
   seededCustomers,
   sessions,
   sessionsRelations,
@@ -336,33 +353,87 @@ describe("kiri-factory stable runtime", () => {
     expect(created[1]?.email).toBe("created-2@example.com");
   });
 
-  it("requires explicit parents instead of auto-creating missing foreign keys", async () => {
+  it("auto-creates one missing single-column parent during create()", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
       db,
-      schema: { posts, users },
+      schema: { sessions, users },
     });
 
-    await expect(
-      factories.posts.create({
-        title: "Explicit author required",
-      }),
-    ).rejects.toThrow(/Required foreign keys are not auto-created by plain create\(\)/);
+    const session = await factories.sessions.create({
+      token: "single-parent",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(persistedUsers).toHaveLength(1);
+    expect(session.userId).toBe(persistedUsers[0]?.id);
+  });
+
+  it("shares one auto-created parent across createMany()", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { sessions, users },
+    });
+
+    const sessionsCreated = await factories.sessions.createMany(3, (index) => ({
+      token: `token-${index + 1}`,
+    }));
+    const persistedUsers = await db.select().from(users);
+
+    expect(sessionsCreated).toHaveLength(3);
+    expect(persistedUsers).toHaveLength(1);
+    expect(new Set(sessionsCreated.map((session) => session.userId))).toEqual(
+      new Set([persistedUsers[0]?.id]),
+    );
+  });
+
+  it("creates fresh auto-generated parents across separate create() calls", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { sessions, users },
+    });
+
+    const first = await factories.sessions.create({
+      token: "first-parent",
+    });
+    const second = await factories.sessions.create({
+      token: "second-parent",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(persistedUsers).toHaveLength(2);
+    expect(first.userId).not.toBe(second.userId);
+  });
+
+  it("does not persist an auto-created parent when child validation fails first", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      schema: { scoredSessions, users },
+    });
+
+    await expect(factories.scoredSessions.create()).rejects.toThrow(
+      /does not satisfy a simple CHECK constraint/i,
+    );
     expect(await db.select().from(users)).toHaveLength(0);
   });
 
-  it("verifies create-time issues across the runtime", async () => {
+  it("verifies create-time issues across the runtime when parent selection is ambiguous", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({
       db,
-      schema: { posts, users },
+      schema: { reviewComments, users },
     });
 
     const issues = await factories.verifyCreates();
 
     expect(issues).toHaveLength(1);
-    expect(issues[0]?.key).toBe("posts");
-    expect(issues[0]?.error.message).toMatch(/Required foreign keys are not auto-created/);
+    expect(issues[0]?.key).toBe("reviewComments");
+    expect(issues[0]?.error.message).toMatch(
+      /only auto-create one missing single-column foreign key at a time/i,
+    );
   });
 
   it("creates belongs-to parents through for(...)", async () => {
@@ -423,6 +494,25 @@ describe("kiri-factory stable runtime", () => {
       });
 
     expect(comment.authorId).not.toBe(comment.reviewerId);
+  });
+
+  it("auto-creates the final missing single-column parent after for(...)", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, schema });
+    const author = await factories.users.create({
+      email: "author@example.com",
+      nickname: "author",
+      role: "member",
+    });
+
+    const comment = await factories.reviewComments.for("author", author).create({
+      body: "Needs one more parent",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(comment.authorId).toBe(author.id);
+    expect(comment.reviewerId).not.toBe(author.id);
+    expect(persistedUsers).toHaveLength(2);
   });
 
   it("supports self relations through for(...)", async () => {
@@ -852,6 +942,15 @@ async function createTestDb() {
       status text not null,
       constraint constrained_articles_rating_check check (rating >= 3 and rating <= 5),
       constraint constrained_articles_status_check check (status in ('draft', 'published'))
+    );
+
+    create table scored_sessions (
+      id serial primary key,
+      user_id integer not null references users(id),
+      rating integer not null,
+      status text not null,
+      constraint scored_sessions_rating_check check (rating >= 3 and rating <= 5),
+      constraint scored_sessions_status_check check (status in ('draft', 'published'))
     );
 
     create table paired_scores (

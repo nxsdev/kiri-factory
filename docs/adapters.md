@@ -105,7 +105,7 @@ Use this with a disposable database or transaction boundary.
 `verifyCreates()` is useful for catching:
 
 - adapter-specific persistence failures
-- missing explicit parents after disabling implicit FK auto-create
+- unresolved or ambiguous parents that plain `create()` cannot auto-create
 - create-time constraint errors that `build()` cannot see
 - simple sequence and unique issues that only show up after more than one insert
 - duplicate explicit values on unique columns
@@ -122,6 +122,9 @@ What it is not:
 `create()` and `createMany()` are not wrapped in a transaction automatically.
 
 If your setup needs atomicity, wrap the sequence in your own transaction boundary.
+This also applies to implicit parent creation: if a parent is auto-created and the
+child insert fails later at database time, only your surrounding transaction can
+guarantee rollback of both rows.
 
 ```ts
 await db.transaction(async (tx) => {

@@ -136,6 +136,46 @@ describe("kiri-factory rqb-v2 runtime", () => {
     expect(created).toHaveLength(2);
   });
 
+  it("auto-creates one missing single-column parent during create()", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, relations });
+
+    const post = await factories.posts.create({
+      title: "Implicit author",
+    });
+    const persistedUsers = await db.select().from(users);
+
+    expect(persistedUsers).toHaveLength(1);
+    expect(post.authorId).toBe(persistedUsers[0]?.id);
+  });
+
+  it("shares one auto-created parent across createMany()", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, relations });
+
+    const postsCreated = await factories.posts.createMany(3, (index) => ({
+      title: `Implicit author ${index + 1}`,
+    }));
+    const persistedUsers = await db.select().from(users);
+
+    expect(postsCreated).toHaveLength(3);
+    expect(persistedUsers).toHaveLength(1);
+    expect(new Set(postsCreated.map((post) => post.authorId))).toEqual(
+      new Set([persistedUsers[0]?.id]),
+    );
+  });
+
+  it("keeps ambiguous required parents explicit", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({ db, relations });
+
+    await expect(
+      factories.reviewComments.create({
+        body: "Ambiguous users",
+      }),
+    ).rejects.toThrow(/only auto-create one missing single-column foreign key at a time/i);
+  });
+
   it("creates belongs-to parents through for(...)", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });

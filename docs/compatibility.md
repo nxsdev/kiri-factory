@@ -24,6 +24,7 @@ See also:
 | official `drizzle-seed`-supported PG/MySQL/SQLite selectors    | Supported       | auto generation follows official selector logic where possible |
 | official generators outside the auto selector                  | Explicit only   | use `columns(f)`; generator existence alone is not enough      |
 | single-column unique + shared `columns(f)`                     | Supported       | unique-safe `drizzle-seed` generators are enforced             |
+| one missing single-column foreign key on `create()`            | Supported       | auto-creates one parent when the choice is unambiguous         |
 | composite foreign keys                                         | Explicit only   | use `for(...)` with an existing parent row or direct overrides |
 | compound / partial / expression unique constraints             | Explicit only   | do not rely on generic auto-generation                         |
 | direct many-to-many writes without a through row               | Not supported   | create the junction row explicitly                             |
@@ -61,9 +62,9 @@ Use explicit factory logic when:
 
 `kiri-factory` can copy composite keys when you use explicit relation planning with `for(...)` and relation metadata.
 
-What does not work generically is implicit parent invention from plain `create()`:
+What does not work generically is implicit parent invention for multi-column keys:
 
-- missing parent keys guessed from foreign-key metadata
+- composite parent keys guessed from foreign-key metadata
 - multi-column foreign keys inferred without an explicit parent row
 
 If your child row depends on multiple columns:

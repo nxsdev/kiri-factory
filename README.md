@@ -16,6 +16,11 @@ Schema-first test factories for Drizzle ORM.
 
 `kiri-factory` gives you test-friendly factories directly from your Drizzle schema.
 
+It supports both:
+
+- stable Drizzle `relations(...)`
+- Drizzle's current beta `Relational Queries v2` shape through `defineRelations(...)` and the `kiri-factory/rqb-v2` entrypoint
+
 You can start with zero per-table factory definitions.
 Required columns are inferred from the schema using the same generator selection logic that powers `drizzle-seed`, missing single-column parents can be auto-created during `create()`, and `create()` still gives you the inserted row back.
 
@@ -118,16 +123,16 @@ Requirements:
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
 - `kiri-factory` is tested with `drizzle-orm` `0.45.x`
-- `kiri-factory/rqb-v2` is tested with `drizzle-orm` `1.0.0-beta.21`
+- `kiri-factory/rqb-v2` is tested with Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
 
 `kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
 
 ## Entrypoints
 
-| Import                | Use when                                  |
-| --------------------- | ----------------------------------------- |
-| `kiri-factory`        | your project uses stable `relations(...)` |
-| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
+| Import                | Use when                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| `kiri-factory`        | your project uses stable `relations(...)`                             |
+| `kiri-factory/rqb-v2` | your project uses beta `defineRelations(...)` / Relational Queries v2 |
 
 ## What It Does
 

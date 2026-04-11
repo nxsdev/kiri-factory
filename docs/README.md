@@ -41,7 +41,7 @@ End-to-end patterns copied from the test suite:
 - you want support boundaries first: [Compatibility and limits](./compatibility.md)
 - your child row depends on multiple foreign-key columns: [Relations](./relations.md)
 - an error message from `kiri-factory` you do not recognize: [Troubleshooting](./troubleshooting.md)
-- you are switching between `rqb-v1` and `rqb-v2`: [Versioning](./versioning.md)
+- you are switching between stable `relations(...)` and beta Relational Queries v2: [Versioning](./versioning.md)
 
 ## Official `drizzle-seed` Docs
 

@@ -27,7 +27,7 @@ Requirements:
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
 - `kiri-factory` is tested with `drizzle-orm` `0.45.x`
-- `kiri-factory/rqb-v2` is tested with `drizzle-orm` `1.0.0-beta.21`
+- `kiri-factory/rqb-v2` is tested with Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
 
 ## Stable `relations(...)`
 
@@ -72,7 +72,7 @@ This row-first pattern maps well to common auth schemas:
 
 ## RQB v2
 
-Use the `rqb-v2` subpath when your project uses `defineRelations(...)`.
+Use the `rqb-v2` subpath when your project uses Drizzle's current beta `Relational Queries v2` API through `defineRelations(...)`.
 
 ```ts
 import { PGlite } from "@electric-sql/pglite";

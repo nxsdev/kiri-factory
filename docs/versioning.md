@@ -18,11 +18,11 @@ See [CHANGELOG](../CHANGELOG.md) for release notes.
 
 Use one of these imports:
 
-| Import                | Use when                                  |
-| --------------------- | ----------------------------------------- |
-| `kiri-factory`        | your project uses stable `relations(...)` |
-| `kiri-factory/rqb-v1` | you want an explicit stable alias         |
-| `kiri-factory/rqb-v2` | your project uses `defineRelations(...)`  |
+| Import                | Use when                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| `kiri-factory`        | your project uses stable `relations(...)`                             |
+| `kiri-factory/rqb-v1` | you want an explicit stable alias                                     |
+| `kiri-factory/rqb-v2` | your project uses beta `defineRelations(...)` / Relational Queries v2 |
 
 Notes:
 
@@ -56,7 +56,7 @@ Current peer dependency:
 Repository test coverage today:
 
 - stable entrypoint: `drizzle-orm` `0.45.x`
-- rqb-v2 entrypoint: `drizzle-orm` `1.0.0-beta.21`
+- rqb-v2 entrypoint: Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
 
 If you are outside those tested ranges, prefer trying the test suite in your app before
 adopting the package widely.

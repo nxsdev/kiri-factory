@@ -47,6 +47,7 @@ export function connectRuntimeRegistry(
 export function attachRegistryHelpers<TTables extends TableMap>(
   registry: ConnectedRegistry,
   tables: TTables,
+  seed: number,
 ) {
   Object.defineProperty(registry, "get", {
     enumerable: false,
@@ -68,6 +69,13 @@ export function attachRegistryHelpers<TTables extends TableMap>(
       }
 
       throw new Error(`Table "${tableNameOf(input)}" is not registered in this runtime.`);
+    },
+  });
+
+  Object.defineProperty(registry, "getSeed", {
+    enumerable: false,
+    value() {
+      return seed;
     },
   });
 

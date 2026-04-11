@@ -136,6 +136,17 @@ describe("kiri-factory rqb-v2 runtime", () => {
     expect(created).toHaveLength(2);
   });
 
+  it("exposes the configured public seed on the runtime", async () => {
+    const { db } = await createTestDb();
+    const factories = createFactories({
+      db,
+      relations,
+      seed: 123,
+    });
+
+    expect(factories.getSeed()).toBe(123);
+  });
+
   it("auto-creates one missing single-column parent during create()", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });

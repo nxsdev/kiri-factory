@@ -89,6 +89,7 @@ export type FactoryRegistry<TSchema extends SchemaMap> = {
   get<TTable extends ExtractTables<TSchema>[keyof ExtractTables<TSchema>]>(
     table: TTable,
   ): RuntimeForTable<TSchema, TTable>;
+  getSeed(): number;
   resetSequences(next?: number): void;
   lint(): Promise<FactoryLintIssue[]>;
   verifyCreates(): Promise<FactoryLintIssue[]>;
@@ -104,6 +105,7 @@ export interface CreateFactoriesOptions<
   definitions?: TDefinitions;
   adapter?: FactoryAdapter<DB>;
   inference?: FactoryInferenceOptions<Table>;
+  seed?: number;
 }
 
 export function createFactories<
@@ -121,6 +123,7 @@ export function createFactories<
   const binding: FactoryBinding<unknown> = {
     db: options.db,
     adapter: options.adapter ?? drizzleReturning<unknown>(),
+    ...(options.seed === undefined ? {} : { seed: options.seed }),
   };
   const connected = connectRuntimeRegistry(
     binding,
@@ -133,6 +136,7 @@ export function createFactories<
   return attachRegistryHelpers(
     connected,
     tables as TableMap,
+    binding.seed ?? 0,
   ) as unknown as FactoryRegistry<TSchema>;
 }
 

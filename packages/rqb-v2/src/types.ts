@@ -18,6 +18,7 @@ export interface FactoryAdapter<DB = unknown> {
 export interface FactoryBinding<DB = unknown> {
   db: DB;
   adapter: FactoryAdapter<DB>;
+  seed?: number;
 }
 
 /**

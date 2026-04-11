@@ -99,6 +99,7 @@ type CreateFactoriesOptions<DB, TSchema> = {
   definitions?: Partial<Record<string, FactoryDefinition<any>>>;
   adapter?: FactoryAdapter<DB>;
   inference?: FactoryInferenceOptions<Table>;
+  seed?: number;
 };
 
 function createFactories<DB, TSchema>(
@@ -115,6 +116,7 @@ type CreateFactoriesOptions<DB, TRelations> = {
   definitions?: Partial<Record<string, FactoryDefinition<any>>>;
   adapter?: FactoryAdapter<DB>;
   inference?: FactoryInferenceOptions<Table>;
+  seed?: number;
 };
 ```
 
@@ -151,6 +153,7 @@ The registry exposes one property per table plus helper methods:
 ```ts
 interface FactoryRegistry<...> {
   get(keyOrTable: string | Table): RuntimeFactory<any>;
+  getSeed(): number;
   resetSequences(next?: number): void;
   lint(): Promise<FactoryLintIssue[]>;
   verifyCreates(): Promise<FactoryLintIssue[]>;
@@ -160,6 +163,7 @@ interface FactoryRegistry<...> {
 Notes:
 
 - `get("users")` and `get(users)` are both supported
+- `getSeed()` returns the configured public seed
 - `resetSequences()` resets every factory in the registry
 - `lint()` runs `build()` across the runtime
 - `verifyCreates()` runs `createMany(2)` across the runtime
@@ -190,6 +194,7 @@ interface FactoryAdapter<DB = unknown> {
 type FactoryBinding<DB = unknown> = {
   db: DB;
   adapter: FactoryAdapter<DB>;
+  seed?: number;
 };
 
 function drizzleReturning<DB>(): FactoryAdapter<DB>;
@@ -198,6 +203,9 @@ function drizzleReturning<DB>(): FactoryAdapter<DB>;
 `drizzleReturning()` is the default adapter used by `createFactories(...)`.
 
 Use a custom adapter when your driver does not support `returning()`.
+
+`seed` is optional on both `createFactories(...)` and `FactoryBinding`.
+When omitted, the default is `0`.
 
 Continue with [Adapters and transactions](./adapters.md).
 

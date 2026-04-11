@@ -55,6 +55,7 @@ const factories = createFactories({
     users: userFactory,
   },
   relations,
+  seed: 123,
 });
 
 const author = {} as typeof users.$inferSelect;
@@ -62,6 +63,7 @@ const reviewer = {} as typeof users.$inferSelect;
 
 factories.posts.for("author", author);
 factories.comments.for("author", author).for("reviewer", reviewer);
+factories.getSeed();
 
 // @ts-expect-error for should not accept a many relation key
 factories.users.for("posts");

@@ -6,16 +6,24 @@
 
 # kiri-factory
 
-Schema-driven factories for explicit Drizzle ORM test setup.
+Schema-first test factories for Drizzle ORM.
 
 > v0.1.0. The API is usable, but small edges may still evolve.
 
-`kiri-factory` keeps row creation close to plain `insert`, but removes the noisy parts:
+`kiri-factory` gives you test-friendly factories directly from your Drizzle schema.
 
-- shared required-column values live in one factory definition
-- `for("relation", row)` wires foreign keys by relation name
-- `create()` / `createMany()` can auto-create missing single-column parents from runtime tables
-- `create()` still returns the row for the table you asked for
+You can start with zero per-table factory definitions.
+Required columns are inferred from the schema using the same generator selection logic that powers `drizzle-seed`, missing single-column parents can be auto-created during `create()`, and `create()` still gives you the inserted row back.
+
+When you do want shared defaults, `defineFactory(..., { columns })` uses the same public `drizzle-seed` generator surface as the official seeding API.
+That means the same `columns(f)` definition can power both small test setup and bulk seeding.
+
+In short:
+
+- start from your schema
+- use `create()` / `createMany()` for test rows
+- add `defineFactory(...)` only where shared defaults help
+- reuse the same `columns(f)` in `drizzle-seed`
 
 ## Quick Example
 
@@ -26,22 +34,14 @@ import { createFactories } from "kiri-factory";
 const factories = createFactories({
   db,
   schema,
+  seed: 42,
 });
 
-const user = await factories.users.create({
-  email: "alice@example.com",
-});
-
-const account = await factories.accounts.for("user", user).create({
-  providerId: "github",
-  accountId: "github-user-123",
-});
-
-const session = await factories.sessions.for("user", user).create();
+const session = await factories.sessions.create();
+// a required single-column parent can be auto-created when its table is in the runtime
 ```
 
-For shared column definitions, `defineFactory(..., { columns })` reuses the same public
-`drizzle-seed` generators used by official `seed(...).refine((f) => ...)` examples:
+If one table needs shared values, add a factory definition:
 
 ```ts
 const customerFactory = defineFactory(customers, {
@@ -53,6 +53,19 @@ const customerFactory = defineFactory(customers, {
   }),
 });
 
+const factories = createFactories({
+  db,
+  schema,
+  seed: 42,
+  definitions: {
+    customers: customerFactory,
+  },
+});
+```
+
+And the same definition plugs straight into `drizzle-seed`:
+
+```ts
 await seed(db, schema).refine((f) => ({
   customers: {
     count: 1000,
@@ -61,8 +74,9 @@ await seed(db, schema).refine((f) => ({
 }));
 ```
 
-Bulk seeding still belongs to `drizzle-seed`.  
-`kiri-factory` stays focused on readable row creation and relation wiring for tests.
+`seed` is optional. The default is `0`, which preserves the built-in stable per-column
+determinism. `kiri-factory` does not log the seed automatically, but you can read it back
+from the runtime with `factories.getSeed()`.
 
 ## Install
 

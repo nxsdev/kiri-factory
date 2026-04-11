@@ -20,6 +20,7 @@ import {
   resolveFactorySeedColumns,
 } from "./drizzle-seed-runtime";
 import { selectAutoSeedGenerator } from "./drizzle-seed-selector";
+import { DEFAULT_FACTORY_SEED, normalizeFactorySeed } from "./seed";
 import { type RuntimeRelationMetadata, type RuntimeRelations } from "./runtime-relations";
 import type {
   FactoryAdapter,
@@ -52,6 +53,7 @@ type RuntimeBinding<DB = unknown> = FactoryBinding<DB> & {
   inference?: FactoryInferenceOptions<Table>;
   registry?: Map<Table, AutoFactory<Table>>;
   relations?: RuntimeRelations;
+  seed: number;
 };
 type ValueSource = "auto" | "factory" | "override" | "relation";
 type ValueSourceMap = Record<string, ValueSource>;
@@ -159,9 +161,15 @@ export class AutoFactory<TTable extends Table> {
    * When no adapter is supplied, kiri-factory uses Drizzle's `returning()`
    * support by default.
    */
-  connect<DB>(db: DB, options?: { adapter?: FactoryAdapter<DB> }): AutoFactory<TTable>;
+  connect<DB>(
+    db: DB,
+    options?: { adapter?: FactoryAdapter<DB>; seed?: number },
+  ): AutoFactory<TTable>;
   connect<DB>(binding: FactoryBinding<DB>): AutoFactory<TTable>;
-  connect<DB>(dbOrBinding: DB | FactoryBinding<DB>, options?: { adapter?: FactoryAdapter<DB> }) {
+  connect<DB>(
+    dbOrBinding: DB | FactoryBinding<DB>,
+    options?: { adapter?: FactoryAdapter<DB>; seed?: number },
+  ) {
     return this.#clone({
       sequence: this.#state.sequence.clone(),
       runtime: normalizeRuntime(
@@ -170,6 +178,7 @@ export class AutoFactory<TTable extends Table> {
         this.#state.runtime?.registry,
         this.#state.runtime?.relations,
         this.#state.runtime?.inference,
+        options?.seed,
       ),
     });
   }
@@ -287,14 +296,18 @@ export class AutoFactory<TTable extends Table> {
       getRelationOwnedColumnKeys(this.#state.table, this.#state.runtime?.relations),
       this.#state.inference,
       this.#state.runtime?.inference,
+      this.#state.runtime?.seed,
     );
     let valueSources = createValueSourceMap(values, "auto");
 
     values = mergeDefinedWithSource(
       values,
-      evaluateFactorySeedColumns(this.#state.table, this.#state.columnsInput, seq) as Partial<
-        InferInsert<TTable>
-      >,
+      evaluateFactorySeedColumns(
+        this.#state.table,
+        this.#state.columnsInput,
+        seq,
+        this.#state.runtime?.seed ?? DEFAULT_FACTORY_SEED,
+      ) as Partial<InferInsert<TTable>>,
       valueSources,
       "factory",
     );
@@ -441,6 +454,7 @@ export class AutoFactory<TTable extends Table> {
         sequence,
         this.#state.inference,
         this.#state.runtime?.inference,
+        this.#state.runtime?.seed,
       );
       nextSources[candidate.localKey] = "relation";
       pendingAutoParents.push(candidate);
@@ -571,15 +585,18 @@ function normalizeRuntime<DB>(
   registry?: Map<Table, AutoFactory<Table>>,
   relations?: RuntimeRelations,
   inference?: FactoryInferenceOptions<Table>,
+  seed?: number,
 ): RuntimeBinding<DB> {
   if (isFactoryBinding(dbOrBinding)) {
     return withOptionalRegistry(
       {
         ...dbOrBinding,
+        seed: normalizeFactorySeed(dbOrBinding.seed),
       },
       registry ?? (dbOrBinding as RuntimeBinding<DB>).registry,
       relations ?? (dbOrBinding as RuntimeBinding<DB>).relations,
       inference ?? (dbOrBinding as RuntimeBinding<DB>).inference,
+      seed ?? (dbOrBinding as RuntimeBinding<DB>).seed,
     );
   }
 
@@ -587,10 +604,12 @@ function normalizeRuntime<DB>(
     {
       db: dbOrBinding,
       adapter: adapter ?? drizzleReturning<DB>(),
+      seed: normalizeFactorySeed(seed),
     },
     registry,
     relations,
     inference,
+    seed,
   );
 }
 
@@ -599,16 +618,14 @@ function withOptionalRegistry<DB>(
   registry?: Map<Table, AutoFactory<Table>>,
   relations?: RuntimeRelations,
   inference?: FactoryInferenceOptions<Table>,
+  seed?: number,
 ) {
-  if (!registry && !relations && !inference) {
-    return binding as RuntimeBinding<DB>;
-  }
-
   return {
     ...binding,
     inference,
     registry,
     relations,
+    seed: normalizeFactorySeed(seed ?? binding.seed),
   } as RuntimeBinding<DB>;
 }
 
@@ -679,6 +696,7 @@ function inferAutoValues<TTable extends Table>(
   relationOwnedKeys: string[] = [],
   inference: FactoryInferenceOptions<TTable> = {},
   runtimeInference?: FactoryInferenceOptions<Table>,
+  seed = DEFAULT_FACTORY_SEED,
 ) {
   const tableName = qualifiedTableNameOf(table);
   const values: Record<string, unknown> = {};
@@ -700,6 +718,7 @@ function inferAutoValues<TTable extends Table>(
       sequence,
       inference,
       runtimeInference,
+      seed,
     );
 
     if (inferred !== SKIP_VALUE) {
@@ -748,6 +767,7 @@ function createAutoParentPlaceholder<TTable extends Table>(
   sequence: number,
   inference: FactoryInferenceOptions<TTable>,
   runtimeInference?: FactoryInferenceOptions<Table>,
+  seed = DEFAULT_FACTORY_SEED,
 ) {
   const column = getTableColumnRecord(table)[columnKey];
 
@@ -763,6 +783,7 @@ function createAutoParentPlaceholder<TTable extends Table>(
     sequence,
     inference,
     runtimeInference,
+    seed,
   );
 
   if (inferred !== SKIP_VALUE) {
@@ -794,6 +815,7 @@ function inferColumnValue<TTable extends Table>(
   sequence: number,
   inference: FactoryInferenceOptions<TTable>,
   runtimeInference?: FactoryInferenceOptions<Table>,
+  seed = DEFAULT_FACTORY_SEED,
 ): InferredValue {
   const metadata = column as InferenceMetadata;
   const sqlType = getColumnSqlType(column);
@@ -832,7 +854,7 @@ function inferColumnValue<TTable extends Table>(
     return SKIP_VALUE;
   }
 
-  return (evaluateAutoSeedGenerator(table, columnKey, column, selectedGenerator, sequence) ??
+  return (evaluateAutoSeedGenerator(table, columnKey, column, selectedGenerator, sequence, seed) ??
     SKIP_VALUE) as InferredValue;
 }
 

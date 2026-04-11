@@ -97,6 +97,7 @@ export type FactoryRegistry<TRelations extends RelationsMap> = {
       keyof TablesFromRelations<TRelations>
     >
   >;
+  getSeed(): number;
   resetSequences(next?: number): void;
   lint(): Promise<FactoryLintIssue[]>;
   verifyCreates(): Promise<FactoryLintIssue[]>;
@@ -112,6 +113,7 @@ export interface CreateFactoriesOptions<
   definitions?: TDefinitions;
   adapter?: FactoryAdapter<DB>;
   inference?: FactoryInferenceOptions<Table>;
+  seed?: number;
 }
 
 export function createFactories<
@@ -124,6 +126,7 @@ export function createFactories<
   const binding: FactoryBinding<unknown> = {
     db: options.db,
     adapter: options.adapter ?? drizzleReturning<unknown>(),
+    ...(options.seed === undefined ? {} : { seed: options.seed }),
   };
   const connected = connectRqbV2Registry(
     binding,
@@ -133,7 +136,11 @@ export function createFactories<
     runtimeRelations,
   );
 
-  return attachRqbV2RegistryHelpers(connected, tables) as unknown as FactoryRegistry<TRelations>;
+  return attachRqbV2RegistryHelpers(
+    connected,
+    tables,
+    binding.seed ?? 0,
+  ) as unknown as FactoryRegistry<TRelations>;
 }
 
 function collectTables(
@@ -196,10 +203,12 @@ function connectRqbV2Registry(
 function attachRqbV2RegistryHelpers(
   registry: ReturnType<typeof connectRuntimeRegistry>,
   tables: TableMap,
+  seed: number,
 ) {
   return attachRegistryHelpers(
     registry,
     tables as unknown as Parameters<typeof attachRegistryHelpers>[1],
+    seed,
   );
 }
 

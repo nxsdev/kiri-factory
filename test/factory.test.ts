@@ -411,6 +411,38 @@ describe("kiri-factory stable runtime", () => {
     expect(created[1]?.email).toBe("created-2@example.com");
   });
 
+  it("uses a public seed for deterministic auto-generated values", async () => {
+    const { db } = await createTestDb();
+    const first = createFactories({
+      db,
+      schema: { users },
+      seed: 123,
+    });
+    const second = createFactories({
+      db,
+      schema: { users },
+      seed: 123,
+    });
+    const different = createFactories({
+      db,
+      schema: { users },
+      seed: 456,
+    });
+    const defaultSeed = createFactories({
+      db,
+      schema: { users },
+    });
+
+    const firstRow = await first.users.build();
+    const secondRow = await second.users.build();
+    const differentRow = await different.users.build();
+
+    expect(first.getSeed()).toBe(123);
+    expect(defaultSeed.getSeed()).toBe(0);
+    expect(firstRow).toEqual(secondRow);
+    expect(differentRow).not.toEqual(firstRow);
+  });
+
   it("auto-creates one missing single-column parent during create()", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({

@@ -10,6 +10,13 @@ changes. See the [versioning guide](./docs/versioning.md) for details.
 
 ## [Unreleased]
 
+### Added
+
+- Public `seed` support on `createFactories(...)` and `FactoryBinding`, with
+  `FactoryRegistry#getSeed()` for inspection.
+- Docs and examples updated to explain the deterministic generator path more
+  directly.
+
 ## [0.1.0]
 
 Initial public release.

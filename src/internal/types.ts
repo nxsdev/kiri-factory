@@ -22,6 +22,12 @@ export interface FactoryAdapter<DB = unknown> {
 export interface FactoryBinding<DB = unknown> {
   db: DB;
   adapter: FactoryAdapter<DB>;
+  /**
+   * Optional public seed for deterministic generator output.
+   *
+   * `0` preserves the default stable per-column seeding behavior.
+   */
+  seed?: number;
 }
 
 /**

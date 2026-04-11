@@ -2,6 +2,7 @@ import { getGeneratorsFunctions } from "drizzle-seed";
 import { getTableColumns, type Column, type Table } from "drizzle-orm";
 
 import { getSingleColumnUniqueKeys, qualifiedTableNameOf } from "./drizzle-introspection";
+import { DEFAULT_FACTORY_SEED } from "./seed";
 import type {
   FactoryColumnsDefinition,
   FactorySeedColumns,
@@ -36,6 +37,7 @@ export function evaluateFactorySeedColumns<TTable extends Table>(
   table: TTable,
   columnsInput: FactorySeedColumnsInput<TTable> | undefined,
   sequence: number,
+  baseSeed = DEFAULT_FACTORY_SEED,
 ) {
   if (!columnsInput) {
     return {} as Partial<Record<keyof FactorySeedColumns<TTable>, unknown>>;
@@ -67,6 +69,7 @@ export function evaluateFactorySeedColumns<TTable extends Table>(
       column,
       generator,
       sequence,
+      baseSeed,
       singleColumnUniqueKeys.has(columnKey),
       "columns",
     );
@@ -85,6 +88,7 @@ export function evaluateAutoSeedGenerator(
   column: Column,
   generator: FactorySeedGenerator,
   sequence: number,
+  baseSeed = DEFAULT_FACTORY_SEED,
 ) {
   return evaluateSeedGenerator(
     table,
@@ -92,6 +96,7 @@ export function evaluateAutoSeedGenerator(
     column as SeedColumnMetadata,
     generator,
     sequence,
+    baseSeed,
     undefined,
     "auto",
   );
@@ -103,6 +108,7 @@ function evaluateSeedGenerator(
   column: SeedColumnMetadata,
   generator: FactorySeedGenerator,
   sequence: number,
+  baseSeed: number,
   isUniqueColumn: boolean | undefined,
   source: "auto" | "columns",
 ) {
@@ -112,6 +118,7 @@ function evaluateSeedGenerator(
     column,
     generator,
     sequence,
+    baseSeed,
     isUniqueColumn,
     source,
   );
@@ -130,6 +137,7 @@ function prepareFactorySeedGenerator(
   column: SeedColumnMetadata,
   generator: FactorySeedGenerator,
   sequence: number,
+  baseSeed: number,
   isUniqueColumn: boolean | undefined,
   source: "auto" | "columns",
 ) {
@@ -176,7 +184,7 @@ function prepareFactorySeedGenerator(
 
   current.init({
     count: sequence,
-    seed: stableColumnSeed(qualifiedTableNameOf(table), columnKey),
+    seed: stableColumnSeed(qualifiedTableNameOf(table), columnKey, baseSeed),
   });
 
   return current;
@@ -214,9 +222,9 @@ export function resolveFactorySeedColumns<TTable extends Table>(
   return resolved;
 }
 
-function stableColumnSeed(tableName: string, columnKey: string) {
+function stableColumnSeed(tableName: string, columnKey: string, baseSeed: number) {
   const text = `${tableName}.${columnKey}`;
-  let hash = 2166136261;
+  let hash = (2166136261 ^ baseSeed) >>> 0;
 
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);

@@ -8,7 +8,11 @@
 
 Schema-first test factories for Drizzle ORM.
 
-> v0.1.0. The API is usable, but small edges may still evolve.
+> [!IMPORTANT]
+> `kiri-factory` is still early.
+> npm publishing is still being finalized, and breaking changes are still possible.
+> Production use is not recommended yet.
+> For now, prefer evaluation in tests, local tooling, or internal development workflows.
 
 `kiri-factory` gives you test-friendly factories directly from your Drizzle schema.
 

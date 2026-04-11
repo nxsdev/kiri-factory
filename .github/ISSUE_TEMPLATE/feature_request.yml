@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a new capability or refinement
+title: "[feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        kiri-factory stays intentionally narrow.
+        Please describe the concrete test-setup problem first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is awkward today, and what are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+      description: A sketch is enough. Examples help.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: For example, columns(f), for(...), call-site overrides, or drizzle-seed.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Why this fits kiri-factory
+      description: Explain why this belongs here instead of in drizzle-seed or app-specific helpers.

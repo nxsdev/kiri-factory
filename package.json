@@ -68,6 +68,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.17.2",
     "drizzle-orm": "catalog:rqb-v1",
     "typescript": "catalog:",
     "vite-plus": "catalog:"

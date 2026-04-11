@@ -61,8 +61,7 @@ The mental model stays small:
 - `for(...)` for parent wiring
 - missing single-column parents can be auto-created during `create()` / `createMany()`
 
-If your schema object includes tables but no relation exports yet, `create()` still works for rows whose required fields can be satisfied directly or by auto-creating missing single-column parents from other runtime tables.  
-`for(...)` only becomes available when the schema also exports relation metadata. Without relations metadata, pass foreign keys directly in the child row overrides.
+If your schema object exports tables but no `relations(...)` yet, `create()` and `createMany()` still work for any row whose required fields can be satisfied directly or by auto-creating missing single-column parents from other registered tables. `for(...)` is typed through the relation metadata — without it the typed relation key set resolves to `never`, so the method is not callable and you have to pass foreign-key columns directly in call-site overrides instead.
 
 This row-first pattern maps well to common auth schemas:
 

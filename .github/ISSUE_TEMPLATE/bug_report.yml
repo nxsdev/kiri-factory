@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a concrete bug in kiri-factory
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report.
+        A failing test case or schema excerpt is the fastest path to a fix.
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: Include kiri-factory, drizzle-orm, Node, and driver versions.
+      placeholder: kiri-factory 0.1.0, drizzle-orm 0.45.x, Node 22.12.0
+    validations:
+      required: true
+  - type: textarea
+    id: schema
+    attributes:
+      label: Minimal schema or factory snippet
+      description: Paste the smallest schema / relation / factory code that reproduces the problem.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: What did you run, and what happened?
+      placeholder: |
+        1. Create factories with ...
+        2. Call create() on ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Links to docs, related issues, or anything else that helps.

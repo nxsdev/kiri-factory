@@ -13,7 +13,7 @@ The default adapter uses Drizzle's `insert(...).values(...).returning()` flow.
 
 In practice, that means:
 
-- PostgreSQL and SQLite are the easiest fit for the default adapter
+- PostgreSQL and SQLite fit the default adapter directly (both dialects expose `returning()` through their Drizzle wrappers)
 - if your driver does not expose the inserted row through `returning()`, pass a custom adapter
 
 Official references:
@@ -31,6 +31,28 @@ So the rule is:
 
 - you want the inserted row back and your stack supports `returning()`: default adapter is fine
 - you only get inserted ids or driver-specific metadata back: use a custom adapter and read the row back yourself
+
+### Reusing The Default Adapter Inside A Custom One
+
+`drizzleReturning<DB>()` is also exported directly. This lets a custom adapter delegate the standard path and only intervene for a subset of tables:
+
+```ts
+import type { Table } from "drizzle-orm";
+import { drizzleReturning, type FactoryAdapter } from "kiri-factory";
+
+const fallback = drizzleReturning<typeof db>();
+
+const adapter: FactoryAdapter<typeof db> = {
+  async create(args) {
+    if (args.table === legacyAuditTable) {
+      return writeThroughLegacyApi(args);
+    }
+    return fallback.create(args);
+  },
+};
+
+const factories = createFactories({ db, schema, adapter });
+```
 
 ## Custom Adapter
 
@@ -68,18 +90,30 @@ Use a custom adapter when:
 
 Tested in this repository:
 
-- PostgreSQL tables with PGlite
-- MySQL tables with a custom adapter
-- SQLite tables with a custom adapter and simple `CHECK` parsing
+- PostgreSQL via PGlite and the default adapter
+- SQLite via libSQL and the default adapter
+- MySQL via a custom adapter (the existing suite uses an echo adapter that stands in for a real MySQL driver)
 
 Important distinction:
 
 - relation planning and factory building are schema-level concerns
 - persistence is adapter-specific
 
-## `lint()`
+## `lint()` And `verifyCreates()`
 
-You can ask a connected runtime to attempt building each entry once:
+Both helpers return the same shape:
+
+```ts
+interface FactoryLintIssue {
+  key: string; // registry key, e.g. "users"
+  table: string; // Drizzle runtime table name
+  error: Error; // the failure from build() or createMany(2)
+}
+```
+
+### `lint()`
+
+Asks a connected runtime to attempt `build()` for every entry once:
 
 ```ts
 const issues = await factories.lint();
@@ -92,7 +126,7 @@ This is useful for catching factories that still need explicit build-time overri
 - adapter-specific persistence failures are out of scope
 - create-time database errors are out of scope
 
-## `verifyCreates()`
+### `verifyCreates()`
 
 If you want a stronger validation pass, ask the runtime to try a real `createMany(2)` per factory:
 

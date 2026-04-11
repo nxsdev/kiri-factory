@@ -172,11 +172,33 @@ Property access is the common path:
 await factories.users.create();
 ```
 
-There is also a fallback lookup API:
+There is also a `get(...)` fallback that accepts either the schema key or the Drizzle table instance:
 
 ```ts
 await factories.get("users").create();
 await factories.get(users).create();
 ```
+
+The table form is useful when a helper already holds the `Table` reference and does not want to re-derive the registry key.
+
+## Sequence Semantics
+
+Each factory keeps its own monotonic sequence counter. The counter advances on every `build()`, `buildMany()`, `create()`, and `createMany()` call, and feeds into auto-generated values and `drizzle-seed` generators for reproducibility.
+
+Reset a single factory:
+
+```ts
+factories.users.resetSequence();
+factories.users.resetSequence(100); // the next row will use sequence 101
+```
+
+Reset every factory in a registry at once:
+
+```ts
+factories.resetSequences();
+factories.resetSequences(0);
+```
+
+This is the usual hook for test suites that want deterministic values between cases, for example inside a `beforeEach`.
 
 If your definition needs custom inferred values, continue with [Inference and `CHECK` guardrails](./inference.md).

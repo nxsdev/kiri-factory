@@ -89,12 +89,15 @@ Use `verifyCreates()` when you want disposable-DB confirmation that real inserts
 
 `kiri-factory` does **not** generate values from `CHECK` constraints.
 
-It only parses a narrow subset of simple single-column `CHECK` expressions, such as:
+It only parses a narrow subset of simple single-column `CHECK` expressions:
 
 - `age > 21`
 - `score >= 1 AND score <= 5`
 - `score BETWEEN 1 AND 5`
 - `status IN ('draft', 'published')`
+- `nickname <> ''` (non-empty string)
+
+When several `CHECK` constraints are attached to the same column, the parsed hints are merged: the tighter numeric bound wins, inclusive/exclusive is preserved, and `IN (...)` lists are intersected.
 
 That parsing is only used to reject bad generated values early.
 
@@ -141,13 +144,15 @@ const factories = createFactories({
 });
 ```
 
-Resolver lookup order:
+Resolver lookup order (`columns` and `customTypes` below refer to the keys on the `inference` option — **not** to `defineFactory(..., { columns })`, which is a different surface):
 
-1. `columns["table.column"]`
-2. `columns["column"]`
-3. `customTypes["exact sql type"]`
-4. `customTypes["normalized sql type"]`
-5. `customTypes["Drizzle columnType"]`
+1. `inference.columns["tableName.columnKey"]`
+2. `inference.columns["columnKey"]`
+3. `inference.customTypes[column.getSQLType()]` — e.g. `"vector(1536)"`
+4. `inference.customTypes[normalized]` — the base form without `(...)`, e.g. `"vector"`
+5. `inference.customTypes[columnType]` — the Drizzle column kind, e.g. `"PgCustomColumn"`
+
+Definition-level `inference` on a single `defineFactory(...)` takes precedence over the runtime-level `inference` passed to `createFactories(...)`.
 
 Rule of thumb:
 

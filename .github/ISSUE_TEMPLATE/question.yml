@@ -1,0 +1,23 @@
+name: Question
+description: Ask about usage, boundaries, or tradeoffs
+title: "[question] "
+labels:
+  - question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Include the schema, relation shape, or exact error message when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
+      description: Mention docs pages, helpers, or adapters you already checked.
+  - type: textarea
+    id: code
+    attributes:
+      label: Relevant code
+      render: ts

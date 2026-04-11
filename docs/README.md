@@ -8,14 +8,27 @@ That makes them easier to:
 - link from issues and pull requests
 - load selectively from Codex, Claude Code, or other agents
 
-## Start Here
+## Guides
 
 - [Getting started](./getting-started.md)
 - [Defining factories](./define-factory.md)
 - [Relations](./relations.md)
 - [Inference and `CHECK` guardrails](./inference.md)
 - [Adapters and transactions](./adapters.md)
+
+## Reference
+
+- [API reference](./api.md)
 - [Compatibility and limits](./compatibility.md)
+- [Versioning and entrypoints](./versioning.md)
+- [Troubleshooting](./troubleshooting.md)
+- [FAQ](./faq.md)
+
+## Recipes
+
+End-to-end patterns copied from the test suite:
+
+- [Recipes index](./recipes/README.md)
 
 ## Quick Links By Situation
 
@@ -27,6 +40,8 @@ That makes them easier to:
 - you need a custom adapter or transaction pattern: [Adapters and transactions](./adapters.md)
 - you want support boundaries first: [Compatibility and limits](./compatibility.md)
 - your child row depends on multiple foreign-key columns: [Relations](./relations.md)
+- an error message from `kiri-factory` you do not recognize: [Troubleshooting](./troubleshooting.md)
+- you are switching between `rqb-v1` and `rqb-v2`: [Versioning](./versioning.md)
 
 ## Official `drizzle-seed` Docs
 

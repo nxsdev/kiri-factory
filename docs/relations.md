@@ -44,20 +44,46 @@ const session = await factories.sessions.create();
 If `sessions.userId` is the only missing required single-column parent key,
 `kiri-factory` creates one `user` row first and then creates the `session`.
 
-The same rule extends across several required belongs-to edges.
-If `users` still needs `tenantId` and `roleId`, those parent rows can also be
-auto-created as long as their tables are part of the runtime.
+Within one `createMany(...)` call, that auto-created parent is shared:
 
 ```ts
 const sessions = await factories.sessions.createMany(3);
+// -> one fresh user, three sessions all pointing at that user
 ```
 
-Within one `createMany(...)` call, that auto-created parent is shared:
-
-- one fresh `user`
-- three `session` rows
-
 Separate `create()` calls still create separate fresh parents.
+
+## Multi-Hop Auto-Parents
+
+Auto-parent creation walks single-column foreign keys across several tables in one step. Every hop must use a single-column foreign key, and every parent table must be registered in the runtime.
+
+```ts
+const factories = createFactories({
+  db,
+  schema: { managedSessions, managedUsers, roles, tenants },
+});
+
+const sessions = await factories.managedSessions.createMany(2);
+// -> one tenant, one role, one managedUser, two managedSessions
+```
+
+Within the same `createMany(...)`, auto-created parents are cached per local key, so every session in the batch points at the same `managedUser`, which in turn points at the same `tenant` and `role`.
+
+If any step in the chain cannot be auto-resolved (composite FK, missing table, unsatisfied `CHECK`, unique constraint, …), the whole chain fails before any insert is issued.
+
+## Cycles
+
+If the foreign-key chain loops back on itself, `kiri-factory` refuses to auto-create the parent and throws:
+
+> Could not auto-create "..." for "..." because the foreign-key chain is cyclic. Add explicit overrides, columns(f), or for(...).
+
+Break the cycle at the call site with `for(...)`, a call-site override, or a shared `columns(f)` entry.
+
+## Auto-Parents Are Not Transactional
+
+`create()` and `createMany()` do not open a transaction around the parent and child inserts. If an auto-created parent has already been persisted and the child insert later fails at the database layer, only the caller's own transaction boundary can roll the parent back.
+
+Wrap the whole scenario in your own transaction when you want atomicity. See [Adapters and transactions](./adapters.md#transactions) for the pattern.
 
 ## Reusing One Parent Row
 

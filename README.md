@@ -1,6 +1,14 @@
+[![npm version](https://img.shields.io/npm/v/kiri-factory)](https://www.npmjs.com/package/kiri-factory)
+[![CI](https://github.com/nxsdev/kiri-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/nxsdev/kiri-factory/actions/workflows/ci.yml)
+![License](https://img.shields.io/npm/l/kiri-factory)
+![Types](https://img.shields.io/npm/types/kiri-factory)
+![Node](https://img.shields.io/node/v/kiri-factory)
+
 # kiri-factory
 
 Schema-driven factories for explicit Drizzle ORM test setup.
+
+> v0.1.0. The API is usable, but small edges may still evolve.
 
 `kiri-factory` keeps row creation close to plain `insert`, but removes the noisy parts:
 
@@ -139,6 +147,11 @@ The docs are split into small Markdown files so humans and agents can jump direc
 - [Inference and `CHECK` guardrails](./docs/inference.md)
 - [Adapters and transactions](./docs/adapters.md)
 - [Compatibility and limits](./docs/compatibility.md)
+- [API reference](./docs/api.md)
+- [Versioning and entrypoints](./docs/versioning.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [FAQ](./docs/faq.md)
+- [Recipes](./docs/recipes/README.md)
 
 ## Development
 

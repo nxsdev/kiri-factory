@@ -51,6 +51,27 @@ This keeps:
 - ownership and tenancy visible in tests
 - `createMany()` predictable when several children share one parent
 
+## Auth-Style Setup
+
+This row-first flow works well for common auth tables such as `users`, `accounts`,
+`sessions`, and `verifications`.
+
+```ts
+const user = await factories.users.create({
+  email: "alice@example.com",
+});
+
+const account = await factories.accounts.for("user", user).create({
+  providerId: "credential",
+  accountId: user.id,
+});
+
+const session = await factories.sessions.for("user", user).create();
+const verification = await factories.verifications.create({
+  identifier: user.email,
+});
+```
+
 ## Return Values
 
 `create()` returns the row for the table you called.

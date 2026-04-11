@@ -19,13 +19,16 @@ const factories = createFactories({
   schema,
 });
 
-const author = await factories.users.create({
-  email: "author@example.com",
+const user = await factories.users.create({
+  email: "alice@example.com",
 });
 
-const post = await factories.posts.for("author", author).create({
-  title: "Hello",
+const account = await factories.accounts.for("user", user).create({
+  providerId: "credential",
+  accountId: user.id,
 });
+
+const session = await factories.sessions.for("user", user).create();
 ```
 
 For shared column definitions, `defineFactory(..., { columns })` reuses the same public

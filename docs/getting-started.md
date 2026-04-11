@@ -43,11 +43,15 @@ const factories = createFactories({
 });
 
 const user = await factories.users.create({
-  email: "ada@example.com",
+  email: "alice@example.com",
 });
 
-const profile = await factories.profiles.for("user", user).create();
-const posts = await factories.posts.for("author", user).createMany(2);
+const account = await factories.accounts.for("user", user).create({
+  providerId: "credential",
+  accountId: user.id,
+});
+
+const session = await factories.sessions.for("user", user).create();
 ```
 
 The mental model stays small:
@@ -58,6 +62,13 @@ The mental model stays small:
 
 If your schema object includes tables but no relation exports yet, `create()` still works for rows whose required fields can be satisfied directly.  
 `for(...)` only becomes available when the schema also exports relation metadata. Without relations metadata, pass foreign keys directly in the child row overrides.
+
+This row-first pattern maps well to common auth schemas:
+
+- `user`
+- `account`
+- `session`
+- `verification`
 
 ## RQB v2
 

@@ -47,8 +47,8 @@ const user = await factories.users.create({
 });
 
 const account = await factories.accounts.for("user", user).create({
-  providerId: "credential",
-  accountId: user.id,
+  providerId: "github",
+  accountId: "github-user-123",
 });
 
 const session = await factories.sessions.for("user", user).create();

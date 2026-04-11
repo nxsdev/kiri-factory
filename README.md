@@ -78,6 +78,31 @@ await seed(db, schema).refine((f) => ({
 determinism. `kiri-factory` does not log the seed automatically, but you can read it back
 from the runtime with `factories.getSeed()`.
 
+What `seed` is good for:
+
+- reproducible test data across runs
+- easier debugging when a generated row causes a failure
+- intentionally varying generated data in CI when you want broader coverage
+
+This follows the same general idea as Drizzle's own deterministic seed docs:
+
+- [Drizzle seed overview](https://orm.drizzle.team/docs/seed-overview)
+- [What is deterministic data generation?](https://orm.drizzle.team/docs/seed-overview#what-is-deterministic-data-generation)
+
+If you want opt-in variation between runs, a common pattern is:
+
+```ts
+const factories = createFactories({
+  db,
+  schema,
+  seed: Number(process.env.TEST_SEED ?? 0),
+});
+```
+
+The generated values still depend on factory call order and sequence state, so the most
+reliable reproduction recipe is: same schema, same seed, same sequence reset, same call
+order.
+
 ## Install
 
 ```bash

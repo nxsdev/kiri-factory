@@ -120,9 +120,24 @@ Use `drizzle-seed` when you want bulk fake data:
 - weighted random
 - seeded datasets shared across environments
 
+`kiri-factory` also accepts `seed`, but it uses it for small factory runs rather than for
+full bulk seeding:
+
+```ts
+const factories = createFactories({
+  db,
+  schema,
+  seed: Number(process.env.TEST_SEED ?? 0),
+});
+```
+
+This is useful when you want deterministic generated rows by default, but still want the
+option to vary them in CI or while chasing edge cases locally.
+
 Official references:
 
 - [Drizzle `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
+- [What is deterministic data generation?](https://orm.drizzle.team/docs/seed-overview#what-is-deterministic-data-generation)
 - [Drizzle generator functions](https://orm.drizzle.team/docs/seed-functions)
 
 If your next step is customizing one table, continue with [Defining factories](./define-factory.md).  

@@ -4,7 +4,7 @@ See also:
 
 - [Docs index](./README.md)
 - [Getting started](./getting-started.md)
-- [Inference and `CHECK` support](./inference.md)
+- [Inference and `CHECK` guardrails](./inference.md)
 - [Relations](./relations.md)
 - [Official `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
 - [Official generator functions](https://orm.drizzle.team/docs/seed-functions)
@@ -179,4 +179,4 @@ await factories.get("users").create();
 await factories.get(users).create();
 ```
 
-If your definition needs custom inferred values, continue with [Inference and `CHECK` support](./inference.md).
+If your definition needs custom inferred values, continue with [Inference and `CHECK` guardrails](./inference.md).

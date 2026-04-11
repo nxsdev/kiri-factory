@@ -4,7 +4,7 @@ See also:
 
 - [Docs index](./README.md)
 - [Getting started](./getting-started.md)
-- [Inference and `CHECK` support](./inference.md)
+- [Inference and `CHECK` guardrails](./inference.md)
 - [Compatibility and limits](./compatibility.md)
 
 ## Default Persistence Adapter
@@ -139,5 +139,5 @@ await db.transaction(async (tx) => {
 });
 ```
 
-If you need to understand what values are inferred before persistence, continue with [Inference and `CHECK` support](./inference.md).  
+If you need to understand what values are inferred before persistence, continue with [Inference and `CHECK` guardrails](./inference.md).  
 If you want the supported feature matrix, continue with [Compatibility and limits](./compatibility.md).

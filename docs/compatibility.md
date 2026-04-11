@@ -5,7 +5,7 @@ See also:
 - [Docs index](./README.md)
 - [Relations](./relations.md)
 - [Adapters and transactions](./adapters.md)
-- [Inference and `CHECK` support](./inference.md)
+- [Inference and `CHECK` guardrails](./inference.md)
 
 `kiri-factory` is intentionally broad, but not magical.
 

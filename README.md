@@ -132,7 +132,7 @@ The docs are split into small Markdown files so humans and agents can jump direc
 - [Getting started](./docs/getting-started.md)
 - [Defining factories](./docs/define-factory.md)
 - [Relations](./docs/relations.md)
-- [Inference and `CHECK` support](./docs/inference.md)
+- [Inference and `CHECK` guardrails](./docs/inference.md)
 - [Adapters and transactions](./docs/adapters.md)
 - [Compatibility and limits](./docs/compatibility.md)
 

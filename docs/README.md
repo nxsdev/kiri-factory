@@ -13,7 +13,7 @@ That makes them easier to:
 - [Getting started](./getting-started.md)
 - [Defining factories](./define-factory.md)
 - [Relations](./relations.md)
-- [Inference and `CHECK` support](./inference.md)
+- [Inference and `CHECK` guardrails](./inference.md)
 - [Adapters and transactions](./adapters.md)
 - [Compatibility and limits](./compatibility.md)
 
@@ -23,7 +23,7 @@ That makes them easier to:
 - one table needs shared column definitions: [Defining factories](./define-factory.md)
 - you want to connect rows by relation name: [Relations](./relations.md)
 - your schema uses junction tables: [Relations](./relations.md)
-- you want to understand what is inferred: [Inference and `CHECK` support](./inference.md)
+- you want to understand what is inferred: [Inference and `CHECK` guardrails](./inference.md)
 - you need a custom adapter or transaction pattern: [Adapters and transactions](./adapters.md)
 - you want support boundaries first: [Compatibility and limits](./compatibility.md)
 - your child row depends on multiple foreign-key columns: [Relations](./relations.md)

@@ -1,4 +1,4 @@
-# Inference and `CHECK` Support
+# Inference and `CHECK` Guardrails
 
 See also:
 
@@ -7,66 +7,54 @@ See also:
 - [Compatibility and limits](./compatibility.md)
 - [Adapters and transactions](./adapters.md)
 
-`kiri-factory` reads common Drizzle metadata and uses it to build rows automatically.
+## Short Version
 
-For plain auto-generated columns, the runtime stays close to Drizzle's official
-`drizzle-seed` selector logic. The runtime does not embed the full seeding engine,
-but it does reuse the same public generator surface and align its built-in column
-selection with official `drizzle-seed` where possible.
+- plain auto generation stays close to Drizzle's official `drizzle-seed` selector logic
+- if a type is not part of the official auto selector path, kiri-factory does not auto-pick it
+- `CHECK` constraints do **not** generate values
+- simple single-column `CHECK` expressions are only used as guardrails
+- complex constraints still fail at insert time
 
-That distinction matters:
+## What Auto Inference Covers
 
-- a generator existing in `drizzle-seed` does **not** automatically mean kiri-factory will pick it during plain auto inference
-- kiri-factory only auto-selects generators that the official selector logic already chooses for that dialect and that still fit the factory's fail-fast safety rules
-
-## What It Infers
+Auto inference is for the boring, structural cases:
 
 - enums
-- Drizzle-supported PostgreSQL / MySQL / SQLite column selectors that `drizzle-seed` also understands
 - nullability
 - DB defaults and generated columns by omission
-- common scalar types that the official selector supports
-- dialect-specific types that the official selector supports, such as Postgres `uuid` and `point`
-- single-column unique fields when you provide shared `columns(f)` generators
+- official PostgreSQL / MySQL / SQLite selector paths that `drizzle-seed` already understands
+- supported dialect-specific types such as Postgres `uuid` and `point`
 
-## What It Does Not Auto-Infer
+If a value needs business meaning or driver-specific knowledge, make it explicit instead.
 
-To keep test failures meaningful, kiri-factory does not auto-pick values for:
+## What Stays Explicit
+
+Use `columns(f)`, `for(...)`, overrides, or custom resolvers for:
 
 - unresolved required foreign keys
-- `customType(...)` columns without explicit resolvers
-- compound, partial, and expression-based unique scenarios that cannot be proven safe
-- compound foreign-key scenarios that cannot be proven safe
+- `customType(...)` without a resolver
+- compound, partial, or expression-based unique constraints
+- compound foreign keys
 - generator families that exist in `drizzle-seed` but are not part of the official auto selector for that dialect
-
-Provide those through `columns(f)`, relation wiring with `for(...)`, or call-time overrides.
 
 ## Official Generators vs Auto Selector
 
-`drizzle-seed` exposes more generators than its auto selector will choose by default.
+These are different:
 
-That means these are different questions:
-
-- "Can I use this generator explicitly in `columns(f)`?"
-- "Will kiri-factory auto-pick this generator from schema metadata alone?"
+- "official `drizzle-seed` has a generator for this type"
+- "kiri-factory will auto-pick it from schema metadata"
 
 Example:
 
 - `f.geometry(...)` exists in official `drizzle-seed`
-- but plain auto inference in kiri-factory does **not** treat every `geometry(...)` column as safe to auto-generate
+- plain `create()` still does **not** auto-pick every `geometry(...)` column
 
 Why:
 
-- official docs already call out known `geometry(point)` seeding limitations for `arraySize > 1` and some `srid` combinations
-- auto-selecting those columns would turn plain `create()` into a black box that can fail for schema-specific reasons
-- keeping them explicit makes failures more predictable
+- official docs already call out `geometry(point)` edge cases
+- auto-picking those values would make `create()` a black box
 
-So the rule is:
-
-- if official selector logic already auto-picks the type, kiri-factory can usually auto-pick it too
-- if official docs expose the generator but not as a safe generic selector path, use `columns(f)` or explicit overrides instead
-
-That explicit path is first-class:
+If you want a generator explicitly, use it explicitly:
 
 ```ts
 const vectorFactory = defineFactory(vectorTable, {
@@ -88,37 +76,30 @@ Official references:
 
 ## Unique Columns
 
-For single-column unique fields, kiri-factory prefers strict behavior over best-effort behavior.
+For single-column unique fields, kiri-factory stays strict:
 
-- if a shared `columns(f)` generator can be made unique safely, kiri-factory uses it
-- if a unique field does not have a provably unique-safe generator, kiri-factory throws before insert
-- compound, partial, and expression-based unique constraints still need explicit modeling with overrides, `columns(f)`, or relation wiring
+- if `columns(f)` can provide a unique-safe generator, it is allowed
+- if not, kiri-factory fails before insert
 
-`verifyCreates()` is the right backstop when:
+For compound, partial, and expression-based unique constraints, stay explicit.
 
-- you intentionally use fixed explicit values for unique columns
-- your schema has non-trivial unique indexes
-- you want disposable-DB confirmation that two real inserts still work
+Use `verifyCreates()` when you want disposable-DB confirmation that real inserts still work.
 
-## Simple `CHECK` Guardrails
+## `CHECK` Guardrails
 
-This is best effort and intentionally narrow.
+`kiri-factory` does **not** generate values from `CHECK` constraints.
 
-Supported examples:
+It only parses a narrow subset of simple single-column `CHECK` expressions, such as:
 
 - `age > 21`
 - `score >= 1 AND score <= 5`
 - `score BETWEEN 1 AND 5`
 - `status IN ('draft', 'published')`
 
-`kiri-factory` no longer invents new values from these expressions.
+That parsing is only used to reject bad generated values early.
 
-Instead, it uses them as guardrails:
-
-- if an official auto-generated value violates a simple parsed `CHECK`, the factory fails fast
-- if you provide an explicit value that satisfies the `CHECK`, the factory proceeds
-
-If your constraint logic is more complex, use explicit factory logic instead.
+- if an auto-generated value violates one of these simple checks, the factory fails fast
+- if you pass a valid explicit value, the factory proceeds
 
 ```ts
 const review = await factories.reviews.create({
@@ -126,15 +107,15 @@ const review = await factories.reviews.create({
 });
 ```
 
-What this does not try to parse:
+What is not parsed:
 
 - multi-column `CHECK`
 - complex SQL expressions or DB functions
-- business logic that only makes sense at the application level
+- application-specific business rules encoded in SQL
 
-Complex `CHECK` expressions are not parsed. When they matter, failures usually surface as database constraint errors during insert, not as kiri-factory inference errors.
+Those still fail at insert time.
 
-You can disable `CHECK` parsing for one definition or one runtime:
+You can disable even this simple parsing:
 
 ```ts
 const reviewFactory = defineFactory(reviews, {
@@ -146,7 +127,7 @@ const reviewFactory = defineFactory(reviews, {
 
 ## `customType(...)`
 
-When schema metadata is not enough, add an inference resolver.
+When schema metadata is not enough, add a resolver:
 
 ```ts
 const factories = createFactories({
@@ -168,41 +149,10 @@ Resolver lookup order:
 4. `customTypes["normalized sql type"]`
 5. `customTypes["Drizzle columnType"]`
 
-Local definition-level inference overrides runtime-level inference.
+Rule of thumb:
 
-```ts
-const embeddingFactory = defineFactory(embeddings, {
-  inference: {
-    columns: {
-      "embeddings.embedding": ({ sequence }) => [sequence * 10],
-    },
-  },
-});
-```
+- if official selector logic supports the type for that dialect, kiri-factory can usually auto-generate it
+- if it does not, keep it explicit
 
-Spatial and driver-specific types follow this rule:
-
-- if official `drizzle-seed` selector logic supports the type for that dialect, kiri-factory can auto-generate it
-- if official selector logic does not support the type, kiri-factory does not add a bespoke built-in fallback
-- driver-specific or custom mapped types such as a MySQL `point` represented through `customType(...)` should use a `customTypes` resolver
-- types with known seeding edge cases, such as `geometry(point)` configurations called out in the official docs, should stay explicit through `columns(f)` or overrides
-
-```ts
-const factories = createFactories({
-  db,
-  schema,
-  inference: {
-    customTypes: {
-      point: ({ sequence }) => ({ x: sequence, y: sequence + 1 }),
-    },
-  },
-});
-```
-
-## Rule of Thumb
-
-- if official `drizzle-seed` knows how to generate the column and kiri-factory can prove the result is safe enough, kiri-factory should infer it
-- if your schema encodes business rules in arbitrary SQL or driver-specific mapping, use explicit factory logic
-
-If your main concern is composite foreign keys or other support boundaries, continue with [Compatibility and limits](./compatibility.md).  
-If you want concrete setup patterns, continue with [Relations](./relations.md) or [Adapters and transactions](./adapters.md).
+If your main concern is support boundaries, continue with [Compatibility and limits](./compatibility.md).  
+If your main concern is setup patterns, continue with [Relations](./relations.md) or [Adapters and transactions](./adapters.md).

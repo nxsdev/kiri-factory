@@ -95,7 +95,7 @@ jobs:
 
       - name: Publish to npm
         if: steps.npm.outputs.published != 'true'
-        run: pnpm publish ./*.tgz --access public --provenance
+        run: pnpm publish ./*.tgz --access public --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

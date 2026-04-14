@@ -17,5 +17,9 @@ export default defineConfig({
     format: ["esm"],
     sourcemap: true,
     clean: true,
+    deps: {
+      neverBundle: [/^drizzle-orm(?:\/.*)?$/, /^drizzle-seed(?:\/.*)?$/],
+      onlyBundle: [],
+    },
   },
 });

@@ -91,6 +91,16 @@ cleanly in `git log`.
 - A reviewer may ask for a test or doc update; that is part of the normal flow,
   not a rejection.
 
+## Releases
+
+The recommended release flow is tag-driven:
+
+1. update `package.json` and move the relevant notes from `Unreleased` in [CHANGELOG.md](./CHANGELOG.md) into a matching version section such as `## [0.1.1]`
+2. commit the release changes
+3. create and push a tag like `v0.1.1`
+
+Pushing the tag runs the release workflow, which verifies the build, publishes to npm with `pnpm publish`, and creates the matching GitHub Release from `CHANGELOG.md`.
+
 ## Reporting Security Issues
 
 Please do **not** file security reports as public issues. Follow the

@@ -10,13 +10,6 @@ changes. See the [versioning guide](./docs/versioning.md) for details.
 
 ## [Unreleased]
 
-### Added
-
-- Public `seed` support on `createFactories(...)` and `FactoryBinding`, with
-  `FactoryRegistry#getSeed()` for inspection.
-- Docs and examples updated to explain the deterministic generator path more
-  directly.
-
 ## [0.1.0]
 
 Initial public release.
@@ -51,10 +44,31 @@ Initial public release.
 - Registry utilities: property-access lookup, `get(stringKey | Table)`,
   `resetSequence(next?)`, `resetSequences(next?)`, `lint()`, and
   `verifyCreates()` returning `FactoryLintIssue[]`.
+- Public `seed` support on `createFactories(...)` and `FactoryBinding`, with
+  `FactoryRegistry#getSeed()` for inspection.
 - Test coverage against PGlite (Postgres) and libSQL (SQLite), plus MySQL-shaped
   adapter tests.
 - Documentation split into small Markdown files under `docs/` for humans and
   agents to consume one topic at a time.
+- Docs and examples updated to explain the deterministic generator path more
+  directly.
+
+### Fixed
+
+- Publish the `kiri-factory/rqb-v2` entrypoint from `dist/rqb-v2` and verify
+  exported files are present in the npm tarball before release.
+- Externalize `drizzle-orm` and `drizzle-seed` from the `rqb-v2` build so the
+  published tarball stays small and does not embed a mismatched Drizzle runtime.
+
+### Changed
+
+- Broaden the `drizzle-orm` peer install range to reduce friction across stable
+  and beta Drizzle releases while keeping the tested matrix documented
+  separately.
+- Pin the runtime `drizzle-seed` dependency to a publish-safe semver range in
+  `package.json`.
+- Make the tag-driven release workflow publish with `pnpm` and create the
+  matching GitHub Release from `CHANGELOG.md`.
 
 ### Known limits
 

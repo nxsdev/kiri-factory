@@ -26,8 +26,13 @@ Requirements:
 
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
+- peer install range: `drizzle-orm` `>=0.36.4 <1 || >=1.0.0-beta.1 <2`
 - `kiri-factory` is tested with `drizzle-orm` `0.45.x`
 - `kiri-factory/rqb-v2` is tested with Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
+
+The peer range is intentionally broader than the repository test matrix so Drizzle users do not
+get blocked on install while the beta line keeps moving. The versions above are the ones
+currently exercised in this repository.
 
 ## Stable `relations(...)`
 

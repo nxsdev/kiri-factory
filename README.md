@@ -10,9 +10,8 @@ Schema-first test factories for Drizzle ORM.
 
 > [!IMPORTANT]
 > `kiri-factory` is still early.
-> npm publishing is still being finalized, and breaking changes are still possible.
-> Production use is not recommended yet.
-> For now, prefer evaluation in tests, local tooling, or internal development workflows.
+> It is published, but small API changes are still possible across `0.x` releases.
+> For production apps, prefer pinning an exact version and checking the changelog before upgrades.
 
 `kiri-factory` gives you test-friendly factories directly from your Drizzle schema.
 
@@ -122,8 +121,13 @@ Requirements:
 
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
+- peer install range: `drizzle-orm` `>=0.36.4 <1 || >=1.0.0-beta.1 <2`
 - `kiri-factory` is tested with `drizzle-orm` `0.45.x`
 - `kiri-factory/rqb-v2` is tested with Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
+
+The peer range is intentionally broader than the repository test matrix so Drizzle users do
+not get blocked on install while the beta line keeps moving. The versions above are the ones
+currently exercised in this repository.
 
 `kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
 

@@ -22,7 +22,6 @@
   },
   "files": [
     "dist",
-    "packages/rqb-v2/dist",
     "docs",
     "README.md",
     "LICENSE"
@@ -42,29 +41,31 @@
       "import": "./dist/index.mjs"
     },
     "./rqb-v2": {
-      "types": "./packages/rqb-v2/dist/index.d.mts",
-      "import": "./packages/rqb-v2/dist/index.mjs"
+      "types": "./dist/rqb-v2/index.d.mts",
+      "import": "./dist/rqb-v2/index.mjs"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "vp run build:workspace",
+    "build": "vp run build:workspace && pnpm pack:check",
     "build:pkg": "vp pack",
     "build:rqb-v2": "vp run @kiri-factory/rqb-v2-internal#build",
     "check": "vp run check:workspace",
     "check:pkg": "vp check",
     "check:rqb-v2": "vp run @kiri-factory/rqb-v2-internal#check",
+    "pack:check": "node ./scripts/verify-pack-contents.mjs",
     "prepublishOnly": "pnpm check && pnpm test && pnpm build",
     "setup:hooks": "pnpm exec vp config",
+    "sync:rqb-v2": "node ./scripts/sync-rqb-v2-dist.mjs",
     "test": "vp run test:workspace",
     "test:pkg": "vp test run",
     "test:rqb-v2": "vp run @kiri-factory/rqb-v2-internal#test",
     "test:watch": "vp test"
   },
   "dependencies": {
-    "drizzle-seed": "catalog:"
+    "drizzle-seed": "^0.3.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
@@ -74,7 +75,7 @@
     "vite-plus": "catalog:"
   },
   "peerDependencies": {
-    "drizzle-orm": ">=0.45.2 <0.46.0 || >=1.0.0-beta.1 <2"
+    "drizzle-orm": ">=0.36.4 <1 || >=1.0.0-beta.1 <2"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

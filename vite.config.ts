@@ -4,7 +4,7 @@ export default defineConfig({
   run: {
     tasks: {
       "build:workspace": {
-        command: "vp run build:pkg && vp run build:rqb-v2",
+        command: "vp run build:pkg && vp run build:rqb-v2 && pnpm sync:rqb-v2",
       },
       "check:workspace": {
         command: "vp run check:pkg && vp run check:rqb-v2",

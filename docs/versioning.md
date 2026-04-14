@@ -27,7 +27,7 @@ Use one of these imports:
 Notes:
 
 - `kiri-factory` and `kiri-factory/rqb-v1` point to the same build
-- `kiri-factory/rqb-v2` has its own build under `packages/rqb-v2`
+- `kiri-factory/rqb-v2` is built from `packages/rqb-v2` and published from `dist/rqb-v2`
 - the public API is intentionally kept as close as possible across both paths
 
 ## Switching Between `rqb-v1` And `rqb-v2`
@@ -50,13 +50,16 @@ From v2 to stable:
 Current peer dependency:
 
 ```txt
->=0.45.2 <0.46.0 || >=1.0.0-beta.1 <2
+>=0.36.4 <1 || >=1.0.0-beta.1 <2
 ```
 
 Repository test coverage today:
 
 - stable entrypoint: `drizzle-orm` `0.45.x`
 - rqb-v2 entrypoint: Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
+
+The peer range is intentionally broader than the test matrix so consumers are not blocked on
+install when moving across compatible Drizzle releases, especially on the beta path.
 
 If you are outside those tested ranges, prefer trying the test suite in your app before
 adopting the package widely.
@@ -95,6 +98,8 @@ The release process is conventional:
 
 - user-facing behavior goes in [CHANGELOG](../CHANGELOG.md)
 - CI runs `check`, `test`, and `build`
+- release tags (`v*`) publish to npm with `pnpm publish`
+- the release workflow creates a GitHub Release from the matching `CHANGELOG.md` section
 - `prepublishOnly` runs the same guardrail locally
 
 ## Continue With

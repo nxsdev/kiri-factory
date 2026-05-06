@@ -70,3 +70,15 @@ export type FactorySeedColumns<TTable extends Table> = Partial<
 export type FactorySeedColumnsInput<TTable extends Table> =
   | FactoryColumnsDefinition<TTable>
   | ((f: FactorySeedFunctions) => FactoryColumnsDefinition<TTable>);
+
+export type FactoryTraitInput<TTable extends Table> = FactorySeedColumnsInput<TTable>;
+
+export type FactoryTraitsInput<TTable extends Table> = Record<string, FactoryTraitInput<TTable>>;
+
+export type FactoryTraitRegistry<
+  TTable extends Table,
+  TTraits extends FactoryTraitsInput<TTable>,
+  TFactory,
+> = {
+  readonly [K in keyof TTraits]: TFactory;
+};

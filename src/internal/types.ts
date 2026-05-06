@@ -173,3 +173,27 @@ export type FactorySeedColumns<TTable extends Table> = Partial<
 export type FactorySeedColumnsInput<TTable extends Table> =
   | FactoryColumnsDefinition<TTable>
   | ((f: FactorySeedFunctions) => FactoryColumnsDefinition<TTable>);
+
+/**
+ * One named trait accepted by `defineFactory(..., { traits })`.
+ *
+ * A trait uses the same column definition surface as `columns`, but it is only
+ * applied when selected through `factory.traits.name`.
+ */
+export type FactoryTraitInput<TTable extends Table> = FactorySeedColumnsInput<TTable>;
+
+/**
+ * Named trait map accepted by `defineFactory(..., { traits })`.
+ */
+export type FactoryTraitsInput<TTable extends Table> = Record<string, FactoryTraitInput<TTable>>;
+
+/**
+ * Runtime shape exposed at `factory.traits`.
+ */
+export type FactoryTraitRegistry<
+  TTable extends Table,
+  TTraits extends FactoryTraitsInput<TTable>,
+  TFactory,
+> = {
+  readonly [K in keyof TTraits]: TFactory;
+};

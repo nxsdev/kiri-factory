@@ -171,8 +171,13 @@ await db.transaction(async (tx) => {
     email: "graph@example.com",
   });
 
-  await factories.posts.for("author", user).createMany(2);
-  await factories.sessions.for("user", user).create();
+  await factories.posts.createMany(2, (index) => ({
+    authorId: user.id,
+    title: `Post ${index + 1}`,
+  }));
+  await factories.sessions.create({
+    userId: user.id,
+  });
 });
 ```
 

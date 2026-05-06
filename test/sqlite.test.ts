@@ -227,7 +227,7 @@ describe("kiri-factory sqlite runtime", () => {
     );
   });
 
-  it("wires belongs-to parents through for(...)", async () => {
+  it("wires belongs-to parents through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const author = await factories.users.create({
@@ -235,14 +235,15 @@ describe("kiri-factory sqlite runtime", () => {
       nickname: "author",
     });
 
-    const session = await factories.sessions.for("user", author).create({
+    const session = await factories.sessions.create({
       token: "for-parent",
+      userId: author.id,
     });
 
     expect(session.userId).toBe(author.id);
   });
 
-  it("supports same-target relation keys through multiple for(...) calls", async () => {
+  it("supports same-target relation keys through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const author = await factories.users.create({
@@ -254,12 +255,11 @@ describe("kiri-factory sqlite runtime", () => {
       nickname: "reviewer",
     });
 
-    const comment = await factories.reviewComments
-      .for("author", author)
-      .for("reviewer", reviewer)
-      .create({
-        body: "LGTM",
-      });
+    const comment = await factories.reviewComments.create({
+      authorId: author.id,
+      body: "LGTM",
+      reviewerId: reviewer.id,
+    });
 
     expect(comment.authorId).toBe(author.id);
     expect(comment.reviewerId).toBe(reviewer.id);
@@ -286,7 +286,7 @@ describe("kiri-factory sqlite runtime", () => {
     expect(review.status).toBe("draft");
   });
 
-  it("copies composite foreign keys through for(...)", async () => {
+  it("copies composite foreign keys through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const version = await factories.orderVersions.create({
@@ -295,8 +295,10 @@ describe("kiri-factory sqlite runtime", () => {
       note: "first version",
     });
 
-    const line = await factories.orderVersionLines.for("orderVersion", version).create({
+    const line = await factories.orderVersionLines.create({
+      orderId: version.orderId,
       sku: "SKU-1",
+      version: version.version,
     });
 
     expect(line.orderId).toBe(version.orderId);

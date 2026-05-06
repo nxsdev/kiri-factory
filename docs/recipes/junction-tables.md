@@ -10,7 +10,9 @@ Use the junction row directly.
 const user = await factories.users.create();
 const group = await factories.groups.create();
 
-const membership = await factories.memberships.for("member", user).for("group", group).create({
+const membership = await factories.memberships.create({
+  memberId: user.id,
+  groupId: group.id,
   role: "owner",
 });
 ```
@@ -21,7 +23,9 @@ const membership = await factories.memberships.for("member", user).for("group", 
 const user = await factories.users.create();
 const group = await factories.groups.create();
 
-const membership = await factories.usersToGroups.for("user", user).for("group", group).create({
+const membership = await factories.usersToGroups.create({
+  userId: user.id,
+  groupId: group.id,
   role: "owner",
 });
 ```

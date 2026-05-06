@@ -21,7 +21,7 @@ import {
 } from "./drizzle-seed-runtime";
 import { selectAutoSeedGenerator } from "./drizzle-seed-selector";
 import { DEFAULT_FACTORY_SEED, normalizeFactorySeed } from "./seed";
-import { type RuntimeRelationMetadata, type RuntimeRelations } from "./runtime-relations";
+import type { RuntimeRelations } from "./runtime-relations";
 import type {
   FactoryAdapter,
   FactoryBinding,
@@ -30,6 +30,7 @@ import type {
   FactorySeedColumns,
   FactorySeedColumnsInput,
   FactorySeedFunctions,
+  FactoryTraitsInput,
 } from "./types";
 
 const SKIP_VALUE = Symbol("kiri-factory.skip");
@@ -67,9 +68,10 @@ type InternalState<TTable extends Table> = {
   table: TTable;
   sequence: SequenceTracker;
   columnsInput?: FactorySeedColumnsInput<TTable>;
+  traitInputs?: FactoryTraitsInput<TTable>;
+  appliedTraits: string[];
   inference: FactoryInferenceOptions<TTable>;
   runtime?: RuntimeBinding;
-  forRelations: ForRelationPlan[];
 };
 
 type InferenceMetadata = Column & {
@@ -103,11 +105,6 @@ const requiredColumnKeysCache = new WeakMap<Table, string[]>();
 type ListOverridesInput<TTable extends Table> =
   | FactoryOverrides<TTable>
   | ((index: number) => FactoryOverrides<TTable>);
-type UntypedRelationInput = Record<string, unknown>;
-type ForRelationPlan = {
-  input: UntypedRelationInput;
-  relationKey: string;
-};
 type AutoParentRow = Record<string, unknown>;
 type AutoParentCache = Map<Table, Map<string, AutoParentRow>>;
 type CreateExecution = {
@@ -191,17 +188,20 @@ export class AutoFactory<TTable extends Table> {
   }
 
   /**
-   * Plans a belongs-to relation for the next `create()` call.
-   *
-   * This only works when the connected runtime was created from a Drizzle
-   * schema object that also exports `relations(...)`.
+   * Named factory variants declared with `defineFactory(..., { traits })`.
    */
-  for(relationKey: string, input: UntypedRelationInput) {
-    assertUniqueRelationPlan(this.#state.forRelations, relationKey, "for");
+  get traits() {
+    const traitInputs = this.#state.traitInputs ?? {};
+    const traits: Record<string, AutoFactory<TTable>> = {};
 
-    return this.#clone({
-      forRelations: [...this.#state.forRelations, { input, relationKey }],
-    });
+    for (const traitName of Object.keys(traitInputs)) {
+      Object.defineProperty(traits, traitName, {
+        enumerable: true,
+        get: () => this.#withTrait(traitName),
+      });
+    }
+
+    return traits;
   }
 
   /**
@@ -267,6 +267,14 @@ export class AutoFactory<TTable extends Table> {
     });
   }
 
+  #withTrait(traitName: string) {
+    assertUniqueTrait(this.#state.appliedTraits, traitName);
+
+    return this.#clone({
+      appliedTraits: [...this.#state.appliedTraits, traitName],
+    });
+  }
+
   async #createInternal(overrides: FactoryOverrides<TTable>, execution: CreateExecution) {
     if (!this.#state.runtime) {
       throw new Error(
@@ -312,6 +320,20 @@ export class AutoFactory<TTable extends Table> {
       "factory",
     );
 
+    for (const traitName of this.#state.appliedTraits) {
+      values = mergeDefinedWithSource(
+        values,
+        evaluateFactorySeedColumns(
+          this.#state.table,
+          this.#state.traitInputs?.[traitName],
+          seq,
+          this.#state.runtime?.seed ?? DEFAULT_FACTORY_SEED,
+        ) as Partial<InferInsert<TTable>>,
+        valueSources,
+        "factory",
+      );
+    }
+
     values = mergeDefinedWithSource(values, overrides, valueSources, "override");
     values = pruneUndefined(values) as Partial<InferInsert<TTable>>;
     valueSources = pruneUndefinedSources(values, valueSources);
@@ -319,7 +341,6 @@ export class AutoFactory<TTable extends Table> {
     let pendingAutoParents: PendingAutoParent[] = [];
 
     if (strategy === "create" && execution) {
-      ({ valueSources, values } = await this.#resolvePlannedParents(values, valueSources));
       ({ pendingAutoParents, valueSources, values } = this.#planAutoParents(
         values,
         valueSources,
@@ -352,50 +373,6 @@ export class AutoFactory<TTable extends Table> {
     }
 
     return values as InferInsert<TTable>;
-  }
-
-  async #resolvePlannedParents(values: Partial<InferInsert<TTable>>, valueSources: ValueSourceMap) {
-    if (!this.#state.runtime?.registry || !this.#state.runtime.relations) {
-      return { valueSources, values };
-    }
-
-    const resolved = { ...values };
-    const nextSources = { ...valueSources };
-
-    for (const plan of this.#state.forRelations) {
-      const relation = this.#getRequiredRelation(plan.relationKey);
-
-      if (!canUseForRelation(relation)) {
-        throw new Error(
-          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" does not own the foreign key. Use for(...) from the child side or create the related row separately.`,
-        );
-      }
-
-      const parentFactory = this.#state.runtime.registry.get(relation.targetTable);
-
-      if (!parentFactory) {
-        throw new Error(
-          `Relation "${plan.relationKey}" on "${tableNameOf(this.#state.table)}" points to "${tableNameOf(relation.targetTable)}", but that table is not registered in this runtime.`,
-        );
-      }
-
-      const parent = plan.input;
-
-      for (let index = 0; index < relation.sourceKeys.length; index += 1) {
-        const sourceKey = relation.sourceKeys[index]!;
-        const targetKey = relation.targetKeys[index]!;
-
-        (resolved as Record<string, unknown>)[sourceKey] = (parent as Record<string, unknown>)[
-          targetKey
-        ];
-        nextSources[sourceKey] = "relation";
-      }
-    }
-
-    return {
-      valueSources: nextSources,
-      values: resolved,
-    };
   }
 
   #planAutoParents(
@@ -444,7 +421,7 @@ export class AutoFactory<TTable extends Table> {
 
       if (execution.path.includes(candidate.foreignTable)) {
         throw new Error(
-          `Could not auto-create "${tableNameOf(candidate.foreignTable)}" for "${tableNameOf(this.#state.table)}" because the foreign-key chain is cyclic. Add explicit overrides, columns(f), or for(...).`,
+          `Could not auto-create "${tableNameOf(candidate.foreignTable)}" for "${tableNameOf(this.#state.table)}" because the foreign-key chain is cyclic. Add explicit overrides or columns(f).`,
         );
       }
 
@@ -546,18 +523,6 @@ export class AutoFactory<TTable extends Table> {
       values: resolved,
     };
   }
-
-  #getRequiredRelation(relationKey: string) {
-    const relation = this.#state.runtime?.relations?.get(this.#state.table, relationKey);
-
-    if (!relation) {
-      throw new Error(
-        `Relation "${relationKey}" is not available on "${tableNameOf(this.#state.table)}". Pass a schema object that exports Drizzle relations(...) definitions.`,
-      );
-    }
-
-    return relation;
-  }
 }
 
 /**
@@ -567,6 +532,7 @@ export function fromTable<TTable extends Table>(
   table: TTable,
   options: {
     columns?: FactorySeedColumnsInput<TTable>;
+    traits?: FactoryTraitsInput<TTable>;
     inference?: FactoryInferenceOptions<TTable>;
   } = {},
 ) {
@@ -574,8 +540,9 @@ export function fromTable<TTable extends Table>(
     table,
     sequence: new SequenceTracker(),
     ...(options.columns ? { columnsInput: options.columns } : {}),
+    ...(options.traits ? { traitInputs: options.traits } : {}),
+    appliedTraits: [],
     inference: options.inference ?? {},
-    forRelations: [],
   });
 }
 
@@ -668,20 +635,12 @@ function cacheAutoParent(
   autoParents.set(table, entries);
 }
 
-function assertUniqueRelationPlan(
-  plans: Array<{ relationKey: string }>,
-  relationKey: string,
-  methodName: "for",
-) {
-  if (plans.some((plan) => plan.relationKey === relationKey)) {
+function assertUniqueTrait(appliedTraits: string[], traitName: string) {
+  if (appliedTraits.includes(traitName)) {
     throw new Error(
-      `Relation "${relationKey}" is already planned on this factory. Remove the duplicate ${methodName}(...) call.`,
+      `Trait "${traitName}" is already applied on this factory. Remove the duplicate trait access.`,
     );
   }
-}
-
-function canUseForRelation(relation: RuntimeRelationMetadata) {
-  return relation.kind === "one" && relation.sourceOwnsForeignKey;
 }
 
 function assertPositiveCount(count: number) {
@@ -1365,7 +1324,7 @@ function ensureSafeUniqueConstraints<TTable extends Table>(
 
     if (autoGeneratedColumnKeys.length > 0) {
       throw new Error(
-        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} still relies on auto-generated values for: ${autoGeneratedColumnKeys.join(", ")}. Provide explicit values through columns(f), for(...), or call-site overrides.`,
+        `Could not safely auto-resolve "${tableNameOf(table)}" because ${describeUniqueConstraint(constraint)} still relies on auto-generated values for: ${autoGeneratedColumnKeys.join(", ")}. Provide explicit values through columns(f) or call-site overrides.`,
       );
     }
   }
@@ -1445,13 +1404,13 @@ function buildMissingColumnHint<TTable extends Table>(table: TTable, missing: st
 
   if (missing.some((columnKey) => compositeForeignKeyColumns.has(columnKey))) {
     hints.push(
-      "Composite foreign keys are never auto-created. Use for(...) with an existing parent row or provide direct overrides for the full key.",
+      "Composite foreign keys are never auto-created. Provide direct overrides for the full key.",
     );
   }
 
   if (missingSingleForeignKeys.length > 0) {
     hints.push(
-      "Single-column foreign keys can be auto-created during create()/createMany() when their parent tables are available in the runtime. Use for(...) or direct overrides for build(), cycles, or unresolved parents.",
+      "Single-column foreign keys can be auto-created during create()/createMany() when their parent tables are available in the runtime. Use direct overrides for build(), cycles, or unresolved parents.",
     );
   }
 

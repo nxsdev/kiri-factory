@@ -64,6 +64,7 @@ function defineFactory<TTable extends Table>(
 ```ts
 type DefineFactoryOptions<TTable extends Table> = {
   columns?: FactorySeedColumnsInput<TTable>;
+  traits?: Record<string, FactorySeedColumnsInput<TTable>>;
   inference?: FactoryInferenceOptions<TTable>;
 };
 ```
@@ -73,6 +74,7 @@ type DefineFactoryOptions<TTable extends Table> = {
 ```ts
 interface FactoryDefinition<TTable extends Table> {
   columns(f: FactorySeedFunctions): FactorySeedColumns<TTable>;
+  readonly traits: Record<string, FactoryDefinition<TTable>>;
   resetSequence(next?: number): void;
   build(overrides?: Partial<InferInsertModel<TTable>>): Promise<InferInsertModel<TTable>>;
   buildMany(
@@ -133,7 +135,7 @@ interface RuntimeFactory<TTable extends Table> extends FactoryDefinition<TTable>
       | Partial<InferInsertModel<TTable>>
       | ((index: number) => Partial<InferInsertModel<TTable>>),
   ): Promise<InferSelectModel<TTable>[]>;
-  for(relation: string, input: InferSelectModel<any>): RuntimeFactory<TTable>;
+  readonly traits: Record<string, RuntimeFactory<TTable>>;
 }
 ```
 
@@ -141,7 +143,8 @@ Important notes:
 
 - `build()` / `buildMany()` stay in memory
 - `create()` / `createMany()` persist through the configured adapter
-- `for(...)` is typed only for child-side one-relations
+- explicit parent wiring is done with normal call-site overrides
+- named traits are exposed as `factory.traits.name`
 - `resetSequence(next?)` is available on both definitions and runtime factories
 
 Continue with [Relations](./relations.md).

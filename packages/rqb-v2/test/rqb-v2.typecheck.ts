@@ -48,7 +48,13 @@ const relations = defineRelations({ comments, posts, users }, (r) => ({
 }));
 
 const db = {} as { query: unknown };
-const userFactory = defineFactory(users);
+const userFactory = defineFactory(users, {
+  traits: {
+    admin: {
+      email: "admin@example.com",
+    },
+  },
+});
 const factories = createFactories({
   db,
   definitions: {
@@ -58,21 +64,14 @@ const factories = createFactories({
   seed: 123,
 });
 
-const author = {} as typeof users.$inferSelect;
-const reviewer = {} as typeof users.$inferSelect;
-
-factories.posts.for("author", author);
-factories.comments.for("author", author).for("reviewer", reviewer);
+void factories.users.traits.admin.create();
 factories.getSeed();
 
-// @ts-expect-error for should not accept a many relation key
-factories.users.for("posts");
+// @ts-expect-error unknown traits should not be available
+factories.users.traits.missing.create();
 
-// @ts-expect-error for(...) requires an explicit parent row
-factories.posts.for("author");
-
-// @ts-expect-error for(...) must use the relation target table row
-factories.posts.for("author", { id: 1, authorId: 1 });
+// @ts-expect-error for should no longer exist on the public runtime
+factories.posts.for("author", { id: 1 });
 
 // @ts-expect-error hasMany should no longer exist on the public runtime
 factories.users.hasMany("posts", 1);

@@ -8,108 +8,13 @@
 
 Schema-first test factories for Drizzle ORM.
 
+`kiri-factory` creates small, typed test factories from your Drizzle schema. You
+can start with no per-table factory files, then add `defineFactory(...)` only
+where shared defaults or named variants help.
+
 > [!IMPORTANT]
-> `kiri-factory` is still early.
-> It is published, but small API changes are still possible across `0.x` releases.
-> For production apps, prefer pinning an exact version and checking the changelog before upgrades.
-
-`kiri-factory` gives you test-friendly factories directly from your Drizzle schema.
-
-It supports both:
-
-- stable Drizzle `relations(...)`
-- Drizzle's current beta `Relational Queries v2` shape through `defineRelations(...)` and the `kiri-factory/rqb-v2` entrypoint
-
-You can start with zero per-table factory definitions.
-Required columns are inferred from the schema using the same generator selection logic that powers `drizzle-seed`, missing single-column parents can be auto-created during `create()`, and `create()` still gives you the inserted row back.
-
-When you do want shared defaults, `defineFactory(..., { columns })` uses the same public `drizzle-seed` generator surface as the official seeding API.
-That means the same `columns(f)` definition can power both small test setup and bulk seeding.
-
-In short:
-
-- start from your schema
-- use `create()` / `createMany()` for test rows
-- add `defineFactory(...)` only where shared defaults help
-- reuse the same `columns(f)` in `drizzle-seed`
-
-## Quick Example
-
-```ts
-import * as schema from "./db/schema";
-import { createFactories } from "kiri-factory";
-
-const factories = createFactories({
-  db,
-  schema,
-  seed: 42,
-});
-
-const session = await factories.sessions.create();
-// a required single-column parent can be auto-created when its table is in the runtime
-```
-
-If one table needs shared values, add a factory definition:
-
-```ts
-const customerFactory = defineFactory(customers, {
-  columns: (f) => ({
-    status: "active",
-    companyName: f.companyName(),
-    contactName: f.fullName(),
-    contactEmail: f.email(),
-  }),
-});
-
-const factories = createFactories({
-  db,
-  schema,
-  seed: 42,
-  definitions: {
-    customers: customerFactory,
-  },
-});
-```
-
-And the same definition plugs straight into `drizzle-seed`:
-
-```ts
-await seed(db, schema).refine((f) => ({
-  customers: {
-    count: 1000,
-    columns: customerFactory.columns(f),
-  },
-}));
-```
-
-`seed` is optional. The default is `0`, which preserves the built-in stable per-column
-determinism. `kiri-factory` does not log the seed automatically, but you can read it back
-from the runtime with `factories.getSeed()`.
-
-What `seed` is good for:
-
-- reproducible test data across runs
-- easier debugging when a generated row causes a failure
-- intentionally varying generated data in CI when you want broader coverage
-
-This follows the same general idea as Drizzle's own deterministic seed docs:
-
-- [Drizzle seed overview](https://orm.drizzle.team/docs/seed-overview)
-- [What is deterministic data generation?](https://orm.drizzle.team/docs/seed-overview#what-is-deterministic-data-generation)
-
-If you want opt-in variation between runs, a common pattern is:
-
-```ts
-const factories = createFactories({
-  db,
-  schema,
-  seed: Number(process.env.TEST_SEED ?? 0),
-});
-```
-
-The generated values still depend on factory call order and sequence state, so the most
-reliable reproduction recipe is: same schema, same seed, same sequence reset, same call
-order.
+> `kiri-factory` is still early. Pin exact versions in production test suites
+> and check the changelog before upgrading across `0.x` releases.
 
 ## Install
 
@@ -121,45 +26,143 @@ Requirements:
 
 - ESM only
 - Node `^20.19.0 || >=22.12.0`
-- peer install range: `drizzle-orm` `>=0.36.4 <1 || >=1.0.0-beta.1 <2`
-- `kiri-factory` is tested with `drizzle-orm` `0.45.x`
-- `kiri-factory/rqb-v2` is tested with Drizzle's current beta `Relational Queries v2` path on `drizzle-orm` `1.0.0-beta.21`
+- peer `drizzle-orm` range: `>=0.36.4 <1 || >=1.0.0-beta.1 <2`
 
-The peer range is intentionally broader than the repository test matrix so Drizzle users do
-not get blocked on install while the beta line keeps moving. The versions above are the ones
-currently exercised in this repository.
+## Basic Usage
 
-`kiri-factory/rqb-v1` is kept as a compatibility alias for the stable path.
+```ts
+import * as schema from "./db/schema";
+import { createFactories } from "kiri-factory";
 
-## Entrypoints
+const factories = createFactories({
+  db,
+  schema,
+});
 
-| Import                | Use when                                                              |
-| --------------------- | --------------------------------------------------------------------- |
-| `kiri-factory`        | your project uses stable `relations(...)`                             |
-| `kiri-factory/rqb-v2` | your project uses beta `defineRelations(...)` / Relational Queries v2 |
+const user = await factories.users.create({
+  email: "alice@example.com",
+});
 
-## What It Does
+const post = await factories.posts.create({
+  authorId: user.id,
+  title: "Hello",
+});
+```
+
+Factories support:
 
 - `build()` / `buildMany()` for in-memory rows
 - `create()` / `createMany()` for persisted rows
-- `for("relation", row)` for explicit parent wiring
-- `defineFactory(..., { columns })` for reusable per-table definitions
+- call-site overrides for one-off values and explicit foreign keys
+- auto-created missing single-column parents during `create()` / `createMany()`
 
-`kiri-factory` is intentionally narrow. It does not try to replace `drizzle-seed`,
-prove every database constraint ahead of time, or hide multi-row scenarios behind a
-second DSL.
+## Shared Defaults
 
-### RQB v2 `defineRelations(...)`
+Use `defineFactory(...)` when one table needs reusable defaults. The `columns`
+callback receives the same public generator surface used by `drizzle-seed`.
 
 ```ts
-import { PGlite } from "@electric-sql/pglite";
-import { drizzle } from "drizzle-orm/pglite";
-import { createFactories } from "kiri-factory/rqb-v2";
-import { defineRelations } from "drizzle-orm";
-import * as schema from "./db/schema";
+import { createFactories, defineFactory } from "kiri-factory";
 
-const client = new PGlite();
-const db = drizzle({ client });
+const userFactory = defineFactory(users, {
+  columns: (f) => ({
+    role: "member",
+    email: f.email(),
+    nickname: f.string({ isUnique: true }),
+  }),
+});
+
+const factories = createFactories({
+  db,
+  schema,
+  definitions: {
+    users: userFactory,
+  },
+});
+
+await factories.users.create();
+```
+
+You can also reuse the same definition from `drizzle-seed`:
+
+```ts
+await seed(db, schema).refine((f) => ({
+  users: {
+    count: 1000,
+    columns: userFactory.columns(f),
+  },
+}));
+```
+
+## Traits
+
+Traits are named variants on a factory. They are exposed as properties under
+`factory.traits`.
+
+```ts
+const userFactory = defineFactory(users, {
+  columns: {
+    role: "member",
+  },
+  traits: {
+    admin: {
+      role: "admin",
+    },
+  },
+});
+
+const admin = await factories.users.traits.admin.create({
+  email: "admin@example.com",
+});
+```
+
+Trait values are applied after `columns` and before call-site overrides. You can
+still override a trait at the call site when a test needs a one-off value.
+
+## Relations
+
+For a specific existing parent, pass the foreign-key columns directly:
+
+```ts
+const user = await factories.users.create();
+
+await factories.sessions.create({
+  userId: user.id,
+});
+```
+
+If a required single-column parent key is missing and the parent table is part of
+the runtime, `create()` can create the parent first:
+
+```ts
+const session = await factories.sessions.create();
+// creates one user first, then the session
+```
+
+Composite foreign keys are explicit-only:
+
+```ts
+const version = await factories.orderVersions.create({
+  orderId: 100,
+  version: 1,
+});
+
+await factories.orderVersionLines.create({
+  orderId: version.orderId,
+  version: version.version,
+  sku: "SKU-1",
+});
+```
+
+## RQB v2
+
+Use `kiri-factory/rqb-v2` when your project uses Drizzle's beta
+`defineRelations(...)` / Relational Queries v2 shape.
+
+```ts
+import { defineRelations } from "drizzle-orm";
+import { createFactories } from "kiri-factory/rqb-v2";
+import * as schema from "./db/schema";
 
 const relations = defineRelations(schema, (r) => ({
   posts: {
@@ -177,44 +180,74 @@ const factories = createFactories({
   db,
   relations,
 });
-
-const author = await factories.users.create();
-const post = await factories.posts.for("author", author).create();
 ```
 
-If you want the official seeding API itself, go straight to:
+`kiri-factory/rqb-v1` is a compatibility alias for the stable entrypoint.
 
-- [Drizzle `drizzle-seed` overview](https://orm.drizzle.team/docs/seed-overview)
-- [Drizzle generator functions](https://orm.drizzle.team/docs/seed-functions)
-- [Drizzle `with` seeding guide](https://orm.drizzle.team/docs/guides/seeding-using-with-option)
+## API Summary
 
-## Docs
+```ts
+defineFactory(table, {
+  columns?: FactorySeedColumnsInput<typeof table>,
+  traits?: Record<string, FactorySeedColumnsInput<typeof table>>,
+  inference?: FactoryInferenceOptions<typeof table>,
+});
 
-The docs are split into small Markdown files so humans and agents can jump directly to one topic.
+createFactories({
+  db,
+  schema, // stable entrypoint
+  definitions,
+  adapter,
+  inference,
+  seed,
+});
 
-- [Docs index](./docs/README.md)
-- [Getting started](./docs/getting-started.md)
+createFactories({
+  db,
+  relations, // rqb-v2 entrypoint
+  definitions,
+  adapter,
+  inference,
+  seed,
+});
+```
+
+The returned registry exposes one property per table plus:
+
+- `get(keyOrTable)`
+- `getSeed()`
+- `resetSequences(next?)`
+- `lint()`
+- `verifyCreates()`
+
+## More Detail
+
+Most users should be able to start from this README. The detailed docs are kept
+for deeper reference:
+
 - [Defining factories](./docs/define-factory.md)
 - [Relations](./docs/relations.md)
 - [Inference and `CHECK` guardrails](./docs/inference.md)
 - [Adapters and transactions](./docs/adapters.md)
-- [Compatibility and limits](./docs/compatibility.md)
 - [API reference](./docs/api.md)
-- [Versioning and entrypoints](./docs/versioning.md)
-- [Troubleshooting](./docs/troubleshooting.md)
-- [FAQ](./docs/faq.md)
-- [Recipes](./docs/recipes/README.md)
+
+Official Drizzle seed docs:
+
+- [Seed overview](https://orm.drizzle.team/docs/seed-overview)
+- [Generator functions](https://orm.drizzle.team/docs/seed-functions)
 
 ## Development
 
-This repository uses `pnpm` workspaces, catalogs, and `Vite+`.
-
 ```bash
-pnpm setup:hooks
+pnpm install
 pnpm check
 pnpm test
 pnpm build
 ```
 
-`pnpm setup:hooks` installs the repo-local Vite+ hooks.  
-The pre-commit hook runs `vp staged`, which applies `vp check --fix` to staged files.
+Before publishing, run:
+
+```bash
+pnpm prepublishOnly
+pnpm publish --access public
+```

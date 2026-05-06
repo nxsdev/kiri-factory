@@ -10,6 +10,28 @@ changes. See the [versioning guide](./docs/versioning.md) for details.
 
 ## [Unreleased]
 
+## [0.1.2]
+
+### Added
+
+- Add named factory traits through `defineFactory(table, { traits })`, exposed
+  as `factory.traits.name`.
+- Export trait-related public types from both stable and `rqb-v2` entrypoints.
+
+### Changed
+
+- Remove the public `for(...)` relation-wiring API. Reuse known parent rows by
+  passing owned foreign-key columns through normal call-site overrides instead.
+- Simplify the README so the main usage, traits, relations, entrypoints, and
+  publishing workflow are understandable from one file.
+- Update relation docs and examples around explicit foreign-key overrides.
+
+## [0.1.1]
+
+### Changed
+
+- Published npm metadata for the Drizzle 1.0 RC line.
+
 ## [0.1.0]
 
 Initial public release.
@@ -78,5 +100,7 @@ Initial public release.
 - Only simple single-column `CHECK` forms are parsed. More complex constraints
   must be satisfied via `columns(f)` or call-site overrides.
 
-[Unreleased]: https://github.com/nxsdev/kiri-factory/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nxsdev/kiri-factory/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/nxsdev/kiri-factory/compare/v0.1.0...v0.1.2
+[0.1.1]: https://www.npmjs.com/package/kiri-factory/v/0.1.1
 [0.1.0]: https://github.com/nxsdev/kiri-factory/releases/tag/v0.1.0

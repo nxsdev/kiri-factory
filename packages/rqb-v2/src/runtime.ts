@@ -1,11 +1,17 @@
-import type { AnyRelation, AnyRelations, InferSelectModel, One, Table } from "drizzle-orm";
+import type { AnyRelations, InferSelectModel, Table } from "drizzle-orm";
 
 import type { FactoryOverrides } from "./core";
 import type { FactoryDefinition } from "./define";
 import { drizzleReturning } from "./drizzle";
 import { tableNameOf } from "./rqb-v2-introspection";
 import { extractRuntimeRelationsFromRqbV2 } from "./rqb-v2-relations";
-import type { FactoryAdapter, FactoryBinding, FactoryInferenceOptions } from "./types";
+import type {
+  FactoryAdapter,
+  FactoryBinding,
+  FactoryInferenceOptions,
+  FactoryTraitRegistry,
+  FactoryTraitsInput,
+} from "./types";
 import {
   attachRegistryHelpers,
   connectRuntimeRegistry,
@@ -15,79 +21,50 @@ import {
 type RelationsMap = AnyRelations;
 type TableMap = Record<string, Table>;
 type DefinitionMap<TTables extends TableMap> = Partial<{
-  [K in keyof TTables]: FactoryDefinition<TTables[K]>;
+  [K in keyof TTables]: FactoryDefinition<TTables[K], FactoryTraitsInput<TTables[K]>>;
 }>;
 type TablesFromRelations<TRelations extends RelationsMap> = {
   [K in keyof TRelations]: TRelations[K] extends { table: infer TTable extends Table }
     ? TTable
     : never;
 };
-type RelationsForKey<
-  TRelations extends RelationsMap,
-  TKey extends keyof TRelations,
-> = TRelations[TKey] extends { relations: infer TConfig extends Record<string, AnyRelation> }
-  ? TConfig
-  : {};
-type RelationKeysOfKind<TRelations extends RelationsMap, TKey extends keyof TRelations, TKind> = {
-  [K in keyof RelationsForKey<TRelations, TKey>]-?: RelationsForKey<
-    TRelations,
-    TKey
-  >[K] extends TKind
-    ? K
-    : never;
-}[keyof RelationsForKey<TRelations, TKey>] &
-  string;
-type OneRelationKeys<
-  TRelations extends RelationsMap,
-  TKey extends keyof TRelations,
-> = RelationKeysOfKind<TRelations, TKey, One<any, any>>;
-type RelationTargetKey<TRelations extends RelationsMap, TRelation extends AnyRelation> = Extract<
-  keyof TRelations,
-  TRelation["targetTableName"]
->;
-type RelationTargetTable<
-  TRelations extends RelationsMap,
-  TKey extends keyof TRelations,
-  TRelationKey extends keyof RelationsForKey<TRelations, TKey>,
-> = TablesFromRelations<TRelations>[RelationTargetKey<
-  TRelations,
-  Extract<RelationsForKey<TRelations, TKey>[TRelationKey], AnyRelation>
->];
+type TraitsOfDefinition<TDefinition, TTable extends Table> =
+  TDefinition extends FactoryDefinition<TTable, infer TTraits> ? TTraits : {};
 type RuntimeForKey<
   TRelations extends RelationsMap,
+  TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>>,
   TKey extends keyof TablesFromRelations<TRelations>,
 > = RuntimeFactory<
   TablesFromRelations<TRelations>[TKey],
-  TRelations,
-  Extract<TKey, keyof TRelations>
+  TraitsOfDefinition<TDefinitions[TKey], TablesFromRelations<TRelations>[TKey]>
 >;
 
 export interface RuntimeFactory<
   TTable extends Table,
-  TRelations extends RelationsMap = {},
-  TKey extends keyof TRelations = never,
-> extends FactoryDefinition<TTable> {
+  TTraits extends FactoryTraitsInput<TTable> = {},
+> extends FactoryDefinition<TTable, TTraits> {
+  readonly traits: FactoryTraitRegistry<TTable, TTraits, RuntimeFactory<TTable, TTraits>>;
   create(overrides?: FactoryOverrides<TTable>): Promise<InferSelectModel<TTable>>;
   createMany(
     count: number,
     overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
   ): Promise<InferSelectModel<TTable>[]>;
-  for<TRelationKey extends OneRelationKeys<TRelations, TKey>>(
-    relation: TRelationKey,
-    input: InferSelectModel<RelationTargetTable<TRelations, TKey, TRelationKey>>,
-  ): RuntimeFactory<TTable, TRelations, TKey>;
 }
 
-export type FactoryRegistry<TRelations extends RelationsMap> = {
-  [K in keyof TablesFromRelations<TRelations>]: RuntimeForKey<TRelations, K>;
+export type FactoryRegistry<
+  TRelations extends RelationsMap,
+  TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>> = {},
+> = {
+  [K in keyof TablesFromRelations<TRelations>]: RuntimeForKey<TRelations, TDefinitions, K>;
 } & {
   get<TKey extends keyof TablesFromRelations<TRelations>>(
     key: TKey,
-  ): RuntimeForKey<TRelations, TKey>;
+  ): RuntimeForKey<TRelations, TDefinitions, TKey>;
   get<TTable extends TablesFromRelations<TRelations>[keyof TablesFromRelations<TRelations>]>(
     table: TTable,
   ): RuntimeForKey<
     TRelations,
+    TDefinitions,
     Extract<
       {
         [K in keyof TablesFromRelations<TRelations>]-?: TablesFromRelations<TRelations>[K] extends TTable
@@ -120,7 +97,9 @@ export function createFactories<
   DB,
   TRelations extends RelationsMap,
   TDefinitions extends DefinitionMap<TablesFromRelations<TRelations>> = {},
->(options: CreateFactoriesOptions<DB, TRelations, TDefinitions>): FactoryRegistry<TRelations> {
+>(
+  options: CreateFactoriesOptions<DB, TRelations, TDefinitions>,
+): FactoryRegistry<TRelations, TDefinitions> {
   const runtimeRelations = extractRuntimeRelationsFromRqbV2(options.relations);
   const tables = collectTables(options.relations, runtimeRelations);
   const binding: FactoryBinding<unknown> = {
@@ -140,7 +119,7 @@ export function createFactories<
     connected,
     tables,
     binding.seed ?? 0,
-  ) as unknown as FactoryRegistry<TRelations>;
+  ) as unknown as FactoryRegistry<TRelations, TDefinitions>;
 }
 
 function collectTables(

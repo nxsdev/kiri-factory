@@ -189,7 +189,33 @@ describe("kiri-factory rqb-v2 runtime", () => {
     expect(comment.authorId).not.toBe(comment.reviewerId);
   });
 
-  it("creates belongs-to parents through for(...)", async () => {
+  it("creates named trait variants", async () => {
+    const { db } = await createTestDb();
+    const userFactory = defineFactory(users, {
+      traits: {
+        admin: {
+          nickname: "admin",
+          role: "admin",
+        },
+      },
+    });
+    const factories = createFactories({
+      db,
+      definitions: {
+        users: userFactory,
+      },
+      relations,
+    });
+
+    const user = await factories.users.traits.admin.create({
+      email: "admin@example.com",
+    });
+
+    expect(user.nickname).toBe("admin");
+    expect(user.role).toBe("admin");
+  });
+
+  it("creates belongs-to parents through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });
     const author = await factories.users.create({
@@ -198,7 +224,8 @@ describe("kiri-factory rqb-v2 runtime", () => {
       role: "member",
     });
 
-    const post = await factories.posts.for("author", author).create({
+    const post = await factories.posts.create({
+      authorId: author.id,
       title: "RQB v2 post",
     });
 
@@ -206,7 +233,7 @@ describe("kiri-factory rqb-v2 runtime", () => {
     expect(persistedAuthor?.email).toBe("author@example.com");
   });
 
-  it("reuses existing parents through for(..., row)", async () => {
+  it("reuses existing parents through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });
     const author = await factories.users.create({
@@ -215,7 +242,8 @@ describe("kiri-factory rqb-v2 runtime", () => {
       role: "member",
     });
 
-    const post = await factories.posts.for("author", author).create({
+    const post = await factories.posts.create({
+      authorId: author.id,
       title: "Existing author",
     });
     const persistedUsers = await db.select().from(users);
@@ -238,24 +266,24 @@ describe("kiri-factory rqb-v2 runtime", () => {
       role: "admin",
     });
 
-    const comment = await factories.reviewComments
-      .for("author", author)
-      .for("reviewer", reviewer)
-      .create({
-        body: "Looks good",
-      });
+    const comment = await factories.reviewComments.create({
+      authorId: author.id,
+      body: "Looks good",
+      reviewerId: reviewer.id,
+    });
 
     expect(comment.authorId).not.toBe(comment.reviewerId);
   });
 
-  it("supports self relations through for(...)", async () => {
+  it("supports self relations through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, relations });
     const manager = await factories.employees.create({
       name: "Boss",
     });
 
-    const employee = await factories.employees.for("manager", manager).create({
+    const employee = await factories.employees.create({
+      managerId: manager.id,
       name: "Worker",
     });
 
@@ -278,8 +306,10 @@ describe("kiri-factory rqb-v2 runtime", () => {
       label: "Core",
     });
 
-    const membership = await factories.usersToGroups.for("user", user).for("group", group).create({
+    const membership = await factories.usersToGroups.create({
+      groupId: group.id,
       role: "owner",
+      userId: user.id,
     });
 
     const [persistedUser] = await db.select().from(users).where(eq(users.id, membership.userId));

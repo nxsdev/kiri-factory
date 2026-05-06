@@ -37,7 +37,7 @@ From stable to v2:
 1. change the import to `kiri-factory/rqb-v2`
 2. replace `schema` with `relations` in `createFactories(...)`
 3. pass the object returned by `defineRelations(...)`
-4. keep `defineFactory(...)`, `for(...)`, adapters, and inference options the same
+4. keep `defineFactory(...)`, adapters, and inference options the same
 
 From v2 to stable:
 

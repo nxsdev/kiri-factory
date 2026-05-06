@@ -16,5 +16,8 @@ export {
   type FactorySeedColumnsInput,
   type FactorySeedFunctions,
   type FactorySeedGenerator,
+  type FactoryTraitInput,
+  type FactoryTraitRegistry,
+  type FactoryTraitsInput,
 } from "./types";
 export { drizzleReturning } from "./drizzle";

@@ -2,12 +2,12 @@ import type { Table } from "drizzle-orm";
 
 import { FACTORY_INSTANCE, fromTable, type AutoFactory } from "./core";
 import type { FactoryDefinition } from "./define";
-import type { FactoryBinding, FactoryInferenceOptions } from "./types";
+import type { FactoryBinding, FactoryInferenceOptions, FactoryTraitsInput } from "./types";
 import { tableNameOf } from "./drizzle-introspection";
 import type { RuntimeRelations } from "./runtime-relations";
 
 type TableMap = Record<string, Table>;
-type AnyDefinition = FactoryDefinition<Table>;
+type AnyDefinition = FactoryDefinition<Table, FactoryTraitsInput<Table>>;
 type ConnectedRegistry = Record<string, AutoFactory<Table>>;
 
 export interface FactoryLintIssue {

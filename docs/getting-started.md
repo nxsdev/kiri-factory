@@ -51,22 +51,25 @@ const user = await factories.users.create({
   email: "alice@example.com",
 });
 
-const account = await factories.accounts.for("user", user).create({
+const account = await factories.accounts.create({
+  userId: user.id,
   providerId: "github",
   accountId: "github-user-123",
 });
 
-const session = await factories.sessions.for("user", user).create();
+const session = await factories.sessions.create({
+  userId: user.id,
+});
 ```
 
 The mental model stays small:
 
 - `build()` / `buildMany()` for in-memory rows
 - `create()` / `createMany()` for persisted rows
-- `for(...)` for parent wiring
+- call-site overrides for explicit parent wiring
 - missing single-column parents can be auto-created during `create()` / `createMany()`
 
-If your schema object exports tables but no `relations(...)` yet, `create()` and `createMany()` still work for any row whose required fields can be satisfied directly or by auto-creating missing single-column parents from other registered tables. `for(...)` is typed through the relation metadata — without it the typed relation key set resolves to `never`, so the method is not callable and you have to pass foreign-key columns directly in call-site overrides instead.
+If your schema object exports tables but no `relations(...)` yet, `create()` and `createMany()` still work for any row whose required fields can be satisfied directly or by auto-creating missing single-column parents from other registered tables.
 
 This row-first pattern maps well to common auth schemas:
 
@@ -107,7 +110,9 @@ const factories = createFactories({
 });
 
 const author = await factories.users.create();
-const post = await factories.posts.for("author", author).create();
+const post = await factories.posts.create({
+  authorId: author.id,
+});
 ```
 
 ## Factory vs Seed
@@ -115,7 +120,7 @@ const post = await factories.posts.for("author", author).create();
 Use `kiri-factory` when a test wants explicit rows:
 
 - create one row at a time
-- reuse a known parent row with `for(...)`
+- reuse a known parent row with explicit foreign-key overrides
 - keep return values predictable
 
 Use `drizzle-seed` when you want bulk fake data:

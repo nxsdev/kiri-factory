@@ -41,7 +41,9 @@ const user = await factories.managedUsers.create({
   roleId: role.id,
 });
 
-const session = await factories.managedSessions.for("user", user).create();
+const session = await factories.managedSessions.create({
+  userId: user.id,
+});
 ```
 
 ## Source Shape

@@ -539,7 +539,33 @@ describe("kiri-factory stable runtime", () => {
     expect(issues[0]?.key).toBe("profiles");
   });
 
-  it("creates belongs-to parents through for(...)", async () => {
+  it("creates named trait variants", async () => {
+    const { db } = await createTestDb();
+    const userFactory = defineFactory(users, {
+      traits: {
+        admin: {
+          nickname: "admin-user",
+          role: "admin",
+        },
+      },
+    });
+    const factories = createFactories({
+      db,
+      schema,
+      definitions: {
+        users: userFactory,
+      },
+    });
+
+    const admin = await factories.users.traits.admin.create({
+      email: "admin@example.com",
+    });
+
+    expect(admin.nickname).toBe("admin-user");
+    expect(admin.role).toBe("admin");
+  });
+
+  it("creates belongs-to parents through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const author = await factories.users.create({
@@ -548,7 +574,8 @@ describe("kiri-factory stable runtime", () => {
       role: "admin",
     });
 
-    const post = await factories.posts.for("author", author).create({
+    const post = await factories.posts.create({
+      authorId: author.id,
       title: "Planned post",
     });
 
@@ -557,7 +584,7 @@ describe("kiri-factory stable runtime", () => {
     expect(post.title).toBe("Planned post");
   });
 
-  it("reuses existing parents through for(..., row)", async () => {
+  it("reuses existing parents through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const author = await factories.users.create({
@@ -566,7 +593,8 @@ describe("kiri-factory stable runtime", () => {
       role: "member",
     });
 
-    const post = await factories.posts.for("author", author).create({
+    const post = await factories.posts.create({
+      authorId: author.id,
       title: "Existing author",
     });
     const persistedUsers = await db.select().from(users);
@@ -589,17 +617,16 @@ describe("kiri-factory stable runtime", () => {
       role: "admin",
     });
 
-    const comment = await factories.reviewComments
-      .for("author", author)
-      .for("reviewer", reviewer)
-      .create({
-        body: "Looks good",
-      });
+    const comment = await factories.reviewComments.create({
+      authorId: author.id,
+      body: "Looks good",
+      reviewerId: reviewer.id,
+    });
 
     expect(comment.authorId).not.toBe(comment.reviewerId);
   });
 
-  it("auto-creates the final missing single-column parent after for(...)", async () => {
+  it("auto-creates the final missing single-column parent after explicit override", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const author = await factories.users.create({
@@ -608,7 +635,8 @@ describe("kiri-factory stable runtime", () => {
       role: "member",
     });
 
-    const comment = await factories.reviewComments.for("author", author).create({
+    const comment = await factories.reviewComments.create({
+      authorId: author.id,
       body: "Needs one more parent",
     });
     const persistedUsers = await db.select().from(users);
@@ -676,14 +704,15 @@ describe("kiri-factory stable runtime", () => {
     expect(await db.select().from(constrainedArticles)).toHaveLength(0);
   });
 
-  it("supports self relations through for(...)", async () => {
+  it("supports self relations through explicit overrides", async () => {
     const { db } = await createTestDb();
     const factories = createFactories({ db, schema });
     const manager = await factories.employees.create({
       name: "Boss",
     });
 
-    const employee = await factories.employees.for("manager", manager).create({
+    const employee = await factories.employees.create({
+      managerId: manager.id,
       name: "Worker",
     });
 
@@ -700,12 +729,11 @@ describe("kiri-factory stable runtime", () => {
     const member = await factories.members.create({ name: "Ada" });
     const group = await factories.groups.create({ label: "Core" });
 
-    const membership = await factories.memberships
-      .for("member", member)
-      .for("group", group)
-      .create({
-        role: "owner",
-      });
+    const membership = await factories.memberships.create({
+      groupId: group.id,
+      memberId: member.id,
+      role: "owner",
+    });
 
     const [persistedMember] = await db
       .select()
@@ -721,7 +749,7 @@ describe("kiri-factory stable runtime", () => {
     expect(membership.role).toBe("owner");
   });
 
-  it("copies composite foreign keys through for(...)", async () => {
+  it("copies composite foreign keys through explicit overrides", async () => {
     const log: Array<{ table: string; values: Record<string, unknown> }> = [];
     const factories = createFactories({
       db: {} as object,
@@ -732,8 +760,10 @@ describe("kiri-factory stable runtime", () => {
       note: "v1",
     });
 
-    const line = await factories.orderVersionLines.for("orderVersion", version).create({
+    const line = await factories.orderVersionLines.create({
+      orderId: version.orderId,
       sku: "sku-1",
+      version: version.version,
     });
 
     expect(line.orderId).toBeTypeOf("number");

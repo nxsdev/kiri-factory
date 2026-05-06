@@ -27,7 +27,7 @@ The SQLite test suite covers:
 
 - `buildMany()` and `createMany()`
 - auto-parent creation
-- `for(...)`
+- explicit foreign-key overrides
 - same-target relations
 - composite foreign keys
 - `CHECK` guardrails

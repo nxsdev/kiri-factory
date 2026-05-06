@@ -1,6 +1,6 @@
 {
   "name": "kiri-factory",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Schema-driven Drizzle factories for explicit test rows and relation wiring",
   "keywords": [
     "drizzle",

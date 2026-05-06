@@ -1,4 +1,4 @@
-import type { ExtractTableRelationsFromSchema, InferSelectModel, One, Table } from "drizzle-orm";
+import type { InferSelectModel, Table } from "drizzle-orm";
 
 import type { FactoryOverrides } from "./core";
 import type { FactoryDefinition } from "./define";
@@ -10,7 +10,13 @@ import {
   connectRuntimeRegistry,
   type FactoryLintIssue,
 } from "./internal/runtime-registry";
-import type { FactoryAdapter, FactoryBinding, FactoryInferenceOptions } from "./types";
+import type {
+  FactoryAdapter,
+  FactoryBinding,
+  FactoryInferenceOptions,
+  FactoryTraitRegistry,
+  FactoryTraitsInput,
+} from "./types";
 
 type SchemaMap = Record<string, unknown>;
 type TableMap = Record<string, Table>;
@@ -18,47 +24,25 @@ type ExtractTables<TSchema extends SchemaMap> = {
   [K in keyof TSchema as TSchema[K] extends Table ? K : never]: Extract<TSchema[K], Table>;
 };
 type DefinitionMap<TTables extends TableMap> = Partial<{
-  [K in keyof TTables]: FactoryDefinition<TTables[K]>;
+  [K in keyof TTables]: FactoryDefinition<TTables[K], FactoryTraitsInput<TTables[K]>>;
 }>;
-type SchemaTableByDbName<TSchema extends SchemaMap, TDbName extends string> = Extract<
-  {
-    [K in keyof TSchema]: TSchema[K] extends Table
-      ? TSchema[K]["_"]["name"] extends TDbName
-        ? TSchema[K]
-        : never
-      : never;
-  }[keyof TSchema],
-  Table
->;
-type SchemaRelationsForTable<
-  TSchema extends SchemaMap,
-  TTable extends Table,
-> = ExtractTableRelationsFromSchema<TSchema, TTable["_"]["name"]>;
-type RelationKeysOfKind<TRelations, TKind> = {
-  [K in keyof TRelations]-?: TRelations[K] extends TKind ? K : never;
-}[keyof TRelations] &
-  string;
-type OneRelationKeys<TSchema extends SchemaMap, TTable extends Table> = RelationKeysOfKind<
-  SchemaRelationsForTable<TSchema, TTable>,
-  One<any, any>
->;
-type RelationTargetTable<
-  TSchema extends SchemaMap,
-  TTable extends Table,
-  TKey extends keyof SchemaRelationsForTable<TSchema, TTable>,
-> = SchemaTableByDbName<
-  TSchema,
-  NonNullable<SchemaRelationsForTable<TSchema, TTable>[TKey]>["referencedTableName"]
->;
+type TraitsOfDefinition<TDefinition, TTable extends Table> =
+  TDefinition extends FactoryDefinition<TTable, infer TTraits> ? TTraits : {};
 type RuntimeForKey<
   TSchema extends SchemaMap,
+  TDefinitions extends DefinitionMap<ExtractTables<TSchema>>,
   TKey extends keyof ExtractTables<TSchema>,
-> = RuntimeFactory<ExtractTables<TSchema>[TKey], TSchema>;
+> = RuntimeFactory<
+  ExtractTables<TSchema>[TKey],
+  TraitsOfDefinition<TDefinitions[TKey], ExtractTables<TSchema>[TKey]>
+>;
 type RuntimeForTable<
   TSchema extends SchemaMap,
+  TDefinitions extends DefinitionMap<ExtractTables<TSchema>>,
   TTable extends ExtractTables<TSchema>[keyof ExtractTables<TSchema>],
 > = RuntimeForKey<
   TSchema,
+  TDefinitions,
   Extract<
     {
       [K in keyof ExtractTables<TSchema>]-?: ExtractTables<TSchema>[K] extends TTable ? K : never;
@@ -69,26 +53,28 @@ type RuntimeForTable<
 
 export interface RuntimeFactory<
   TTable extends Table,
-  TSchema extends SchemaMap = {},
-> extends FactoryDefinition<TTable> {
+  TTraits extends FactoryTraitsInput<TTable> = {},
+> extends FactoryDefinition<TTable, TTraits> {
+  readonly traits: FactoryTraitRegistry<TTable, TTraits, RuntimeFactory<TTable, TTraits>>;
   create(overrides?: FactoryOverrides<TTable>): Promise<InferSelectModel<TTable>>;
   createMany(
     count: number,
     overrides?: FactoryOverrides<TTable> | ((index: number) => FactoryOverrides<TTable>),
   ): Promise<InferSelectModel<TTable>[]>;
-  for<TKey extends OneRelationKeys<TSchema, TTable>>(
-    relation: TKey,
-    input: InferSelectModel<RelationTargetTable<TSchema, TTable, TKey>>,
-  ): RuntimeFactory<TTable, TSchema>;
 }
 
-export type FactoryRegistry<TSchema extends SchemaMap> = {
-  [K in keyof ExtractTables<TSchema>]: RuntimeForKey<TSchema, K>;
+export type FactoryRegistry<
+  TSchema extends SchemaMap,
+  TDefinitions extends DefinitionMap<ExtractTables<TSchema>> = {},
+> = {
+  [K in keyof ExtractTables<TSchema>]: RuntimeForKey<TSchema, TDefinitions, K>;
 } & {
-  get<TKey extends keyof ExtractTables<TSchema>>(key: TKey): RuntimeForKey<TSchema, TKey>;
+  get<TKey extends keyof ExtractTables<TSchema>>(
+    key: TKey,
+  ): RuntimeForKey<TSchema, TDefinitions, TKey>;
   get<TTable extends ExtractTables<TSchema>[keyof ExtractTables<TSchema>]>(
     table: TTable,
-  ): RuntimeForTable<TSchema, TTable>;
+  ): RuntimeForTable<TSchema, TDefinitions, TTable>;
   getSeed(): number;
   resetSequences(next?: number): void;
   lint(): Promise<FactoryLintIssue[]>;
@@ -112,7 +98,9 @@ export function createFactories<
   DB,
   TSchema extends SchemaMap,
   TDefinitions extends DefinitionMap<ExtractTables<TSchema>> = {},
->(options: CreateFactoriesOptions<DB, TSchema, TDefinitions>): FactoryRegistry<TSchema> {
+>(
+  options: CreateFactoriesOptions<DB, TSchema, TDefinitions>,
+): FactoryRegistry<TSchema, TDefinitions> {
   const entries = Object.entries(options.schema).filter(([, value]) => isTable(value));
 
   if (entries.length === 0) {
@@ -128,7 +116,10 @@ export function createFactories<
   const connected = connectRuntimeRegistry(
     binding,
     tables as TableMap,
-    options.definitions as Record<string, FactoryDefinition<Table> | undefined>,
+    options.definitions as Record<
+      string,
+      FactoryDefinition<Table, FactoryTraitsInput<Table>> | undefined
+    >,
     options.inference,
     extractRuntimeRelations(options.schema),
   );
@@ -137,7 +128,7 @@ export function createFactories<
     connected,
     tables as TableMap,
     binding.seed ?? 0,
-  ) as unknown as FactoryRegistry<TSchema>;
+  ) as unknown as FactoryRegistry<TSchema, TDefinitions>;
 }
 
 export type { FactoryLintIssue } from "./internal/runtime-registry";

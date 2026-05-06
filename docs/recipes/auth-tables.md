@@ -12,19 +12,21 @@ const user = await factories.users.create({
   email: "alice@example.com",
 });
 
-const account = await factories.accounts.for("user", user).create({
+const account = await factories.accounts.create({
+  userId: user.id,
   providerId: "github",
   accountId: "alice-gh",
 });
 
-const session = await factories.sessions.for("user", user).create();
+const session = await factories.sessions.create({
+  userId: user.id,
+});
 ```
 
 Why this shape works well:
 
 - one explicit parent row
-- no duplicated foreign-key values
-- `session.userId` and `account.userId` stay driven by relation metadata
+- foreign-key values stay visible at the call site
 
 ## Auto-Parent For The Smallest Case
 

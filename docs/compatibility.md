@@ -11,31 +11,31 @@ See also:
 
 ## Support Matrix
 
-| Feature                                                        | Status          | Notes                                                            |
-| -------------------------------------------------------------- | --------------- | ---------------------------------------------------------------- |
-| PostgreSQL tables                                              | Supported       | tested with PGlite in this repository                            |
-| SQLite tables                                                  | Supported       | tested with libSQL in this repository                            |
-| MySQL tables                                                   | Supported       | tested via a custom adapter in this repository                   |
-| `pgSchema(...)`, `mysqlSchema(...)`, `sqliteTableCreator(...)` | Supported       | schema metadata is preserved through introspection               |
-| `gel-core`, `singlestore-core` table metadata                  | Introspected    | metadata is read; no runtime test coverage in this repository    |
-| stable `relations(...)`                                        | Supported       | typed `for(...)` on child-side one-relations                     |
-| `defineRelations(...)` via `kiri-factory/rqb-v2`               | Supported       | typed `for(...)` on child-side one-relations                     |
-| self relations and same-target relations                       | Supported       | use relation keys, not table names                               |
-| junction tables and composite primary keys                     | Supported       | preferred many-to-many path                                      |
-| simple single-column `CHECK`                                   | Guardrail only  | parsed to reject invalid generated values, not to invent them    |
-| `customType(...)`                                              | Resolver-driven | add inference resolvers where needed                             |
-| official `drizzle-seed`-supported PG/MySQL/SQLite selectors    | Supported       | auto generation follows official selector logic where possible   |
-| official generators outside the auto selector                  | Explicit only   | use `columns(f)`; generator existence alone is not enough        |
-| single-column unique + shared `columns(f)`                     | Supported       | unique-safe `drizzle-seed` generators are enforced               |
-| missing single-column foreign keys on `create()`               | Supported       | auto-creates parents when their tables are available             |
-| multi-hop single-column parent chains                          | Supported       | each hop must have a single-column FK and a registered table     |
-| composite foreign keys                                         | Explicit only   | use `for(...)` with an existing parent row or direct overrides   |
-| compound / partial / expression unique constraints             | Explicit only   | do not rely on generic auto-generation                           |
-| direct many-to-many writes without a through row               | Not supported   | create the junction row explicitly                               |
-| complex `CHECK` SQL                                            | Manual override | use `columns(f)`, overrides, or resolvers                        |
-| cycle-breaking in auto-parent chains                           | Error only      | cyclic chains throw; break the cycle with `for(...)` / overrides |
-| automatic transactions around `create()` / `createMany()`      | Not supported   | wrap the sequence in your own `db.transaction(...)`              |
-| polymorphic relations                                          | Out of scope    | not part of `v0.1`                                               |
+| Feature                                                        | Status          | Notes                                                          |
+| -------------------------------------------------------------- | --------------- | -------------------------------------------------------------- |
+| PostgreSQL tables                                              | Supported       | tested with PGlite in this repository                          |
+| SQLite tables                                                  | Supported       | tested with libSQL in this repository                          |
+| MySQL tables                                                   | Supported       | tested via a custom adapter in this repository                 |
+| `pgSchema(...)`, `mysqlSchema(...)`, `sqliteTableCreator(...)` | Supported       | schema metadata is preserved through introspection             |
+| `gel-core`, `singlestore-core` table metadata                  | Introspected    | metadata is read; no runtime test coverage in this repository  |
+| stable `relations(...)`                                        | Supported       | relation metadata supports auto-parent discovery               |
+| `defineRelations(...)` via `kiri-factory/rqb-v2`               | Supported       | relation metadata supports auto-parent discovery               |
+| self relations and same-target relations                       | Supported       | pass the owned foreign-key columns explicitly                  |
+| junction tables and composite primary keys                     | Supported       | preferred many-to-many path                                    |
+| simple single-column `CHECK`                                   | Guardrail only  | parsed to reject invalid generated values, not to invent them  |
+| `customType(...)`                                              | Resolver-driven | add inference resolvers where needed                           |
+| official `drizzle-seed`-supported PG/MySQL/SQLite selectors    | Supported       | auto generation follows official selector logic where possible |
+| official generators outside the auto selector                  | Explicit only   | use `columns(f)`; generator existence alone is not enough      |
+| single-column unique + shared `columns(f)`                     | Supported       | unique-safe `drizzle-seed` generators are enforced             |
+| missing single-column foreign keys on `create()`               | Supported       | auto-creates parents when their tables are available           |
+| multi-hop single-column parent chains                          | Supported       | each hop must have a single-column FK and a registered table   |
+| composite foreign keys                                         | Explicit only   | override the full key directly                                 |
+| compound / partial / expression unique constraints             | Explicit only   | do not rely on generic auto-generation                         |
+| direct many-to-many writes without a through row               | Not supported   | create the junction row explicitly                             |
+| complex `CHECK` SQL                                            | Manual override | use `columns(f)`, overrides, or resolvers                      |
+| cycle-breaking in auto-parent chains                           | Error only      | cyclic chains throw; break the cycle with overrides            |
+| automatic transactions around `create()` / `createMany()`      | Not supported   | wrap the sequence in your own `db.transaction(...)`            |
+| polymorphic relations                                          | Out of scope    | not part of `v0.1`                                             |
 
 ## What This Library Does Not Try To Do
 
@@ -66,7 +66,7 @@ Use explicit factory logic when:
 
 ## Composite Foreign Keys
 
-`kiri-factory` can copy composite keys when you use explicit relation planning with `for(...)` and relation metadata.
+Composite keys are explicit-only.
 
 What does not work generically is implicit parent invention for multi-column keys:
 
@@ -76,8 +76,7 @@ What does not work generically is implicit parent invention for multi-column key
 If your child row depends on multiple columns:
 
 - create the parent first
-- pass that row to `for(...)`
-- or override the full key directly
+- override the full key directly
 
 ## Complex Constraints
 
@@ -91,7 +90,6 @@ Non-trivial uniqueness falls into the same bucket:
 Set the participating columns explicitly through:
 
 - `columns(f)`
-- `for(...)`
 - call-site overrides
 
 Then use `verifyCreates()` against a disposable database when you want real insert coverage.

@@ -14,6 +14,7 @@ See also:
 Use `defineFactory(...)` when one table needs shared logic:
 
 - shared columns
+- named traits
 - custom inference
 - build-time behavior without a connected DB
 
@@ -38,8 +39,57 @@ const built = await userFactory.build({
 In practice, `columns` should be the default place you reach for first.
 
 - use `columns` for shared fixed values and shared drizzle-seed generators
+- use `traits` for named variations of those defaults
 - use call-site overrides for one-off differences
 - use plain helper functions when a business scenario spans multiple tables
+
+## Traits
+
+Traits are named variants on one factory. They are exposed as properties under
+`factory.traits`, matching the common factory pattern used by libraries such as
+`@praha/drizzle-factory`.
+
+```ts
+const userFactory = defineFactory(users, {
+  columns: {
+    role: "member",
+  },
+  traits: {
+    admin: {
+      role: "admin",
+    },
+    suspended: {
+      status: "suspended",
+    },
+  },
+});
+
+const factories = createFactories({
+  db,
+  schema,
+  definitions: {
+    users: userFactory,
+  },
+});
+
+const admin = await factories.users.traits.admin.create({
+  email: "admin@example.com",
+});
+```
+
+Trait values are applied after `columns` and before call-site overrides:
+
+```ts
+const memberRole = await factories.users.traits.admin.create({
+  role: "member",
+});
+```
+
+Traits can be chained when you want to compose variants:
+
+```ts
+await factories.users.traits.admin.traits.suspended.create();
+```
 
 ## Sharing Official `drizzle-seed` Generators
 

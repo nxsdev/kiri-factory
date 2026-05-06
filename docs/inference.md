@@ -29,7 +29,7 @@ If a value needs business meaning or driver-specific knowledge, make it explicit
 
 ## What Stays Explicit
 
-Use `columns(f)`, `for(...)`, overrides, or custom resolvers for:
+Use `columns(f)`, traits, overrides, or custom resolvers for:
 
 - unresolved required foreign keys
 - `customType(...)` without a resolver

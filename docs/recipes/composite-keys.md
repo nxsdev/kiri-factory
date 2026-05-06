@@ -1,6 +1,6 @@
 # Composite Keys
 
-Composite foreign keys are supported through explicit `for(...)` calls.
+Composite foreign keys are supported through explicit overrides.
 
 They are not auto-created generically.
 
@@ -13,12 +13,14 @@ const version = await factories.orderVersions.create({
   note: "first",
 });
 
-const line = await factories.orderVersionLines.for("orderVersion", version).create({
+const line = await factories.orderVersionLines.create({
+  orderId: version.orderId,
+  version: version.version,
   sku: "SKU-1",
 });
 ```
 
-`for("orderVersion", version)` copies both foreign-key columns:
+Pass every owned foreign-key column:
 
 - `orderId`
 - `version`
